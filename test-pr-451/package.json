@@ -1,0 +1,12 @@
+{
+  "name": "test-pr-451",
+  "version": "1.0.0",
+  "description": "Test project to verify PR #451: unwanted platform binaries not installed as a dependency",
+  "type": "module",
+  "scripts": {
+    "test": "node test-imports.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "github:modelcontextprotocol/ext-apps#claude/fix-issue-222-Dp20q"
+  }
+}
