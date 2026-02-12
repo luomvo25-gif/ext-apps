@@ -25,6 +25,24 @@ Add to your MCP client configuration (stdio transport):
 }
 ```
 
+### Local Development
+
+To test local modifications, use this configuration (replace `~/code/ext-apps` with your clone path):
+
+```json
+{
+  "mcpServers": {
+    "say": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "uv run --index https://pypi.org/simple ~/code/ext-apps/examples/say-server/server.py --stdio"
+      ]
+    }
+  }
+}
+```
+
 ## MCP App Features Demonstrated
 
 This example showcases several MCP App capabilities:

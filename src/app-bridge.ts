@@ -78,6 +78,7 @@ import {
   McpUiRequestDisplayModeRequestSchema,
   McpUiRequestDisplayModeResult,
   McpUiResourcePermissions,
+  McpUiToolMeta,
 } from "./types";
 import {
   validateContentModalities,
@@ -114,7 +115,7 @@ export { PostMessageTransport } from "./message-transport";
  */
 export function getToolUiResourceUri(tool: Partial<Tool>): string | undefined {
   // Try new nested format first: _meta.ui.resourceUri
-  const uiMeta = tool._meta?.ui as { resourceUri?: unknown } | undefined;
+  const uiMeta = tool._meta?.ui as McpUiToolMeta | undefined;
   let uri: unknown = uiMeta?.resourceUri;
 
   // Fall back to deprecated flat format: _meta["ui/resourceUri"]
@@ -128,6 +129,34 @@ export function getToolUiResourceUri(tool: Partial<Tool>): string | undefined {
     throw new Error(`Invalid UI resource URI: ${JSON.stringify(uri)}`);
   }
   return undefined;
+}
+
+/**
+ * Check if a tool is visible to the model only.
+ *
+ * @param tool - Tool object with visibility metadata
+ * @returns True if the tool is visible to the model only, false otherwise
+ */
+export function isToolVisibilityModelOnly(tool: Partial<Tool>): boolean {
+  const uiMeta = tool._meta?.ui as McpUiToolMeta | undefined;
+  const visibility = uiMeta?.visibility as Array<"model" | "app"> | undefined;
+  if (!visibility) return false;
+  if (visibility.length === 1 && visibility[0] === "model") return true;
+  return false;
+}
+
+/**
+ * Check if a tool is visible to the app only.
+ *
+ * @param tool - Tool object with visibility metadata
+ * @returns True if the tool is visible to the app only, false otherwise
+ */
+export function isToolVisibilityAppOnly(tool: Partial<Tool>): boolean {
+  const uiMeta = tool._meta?.ui as McpUiToolMeta | undefined;
+  const visibility = uiMeta?.visibility as Array<"model" | "app"> | undefined;
+  if (!visibility) return false;
+  if (visibility.length === 1 && visibility[0] === "app") return true;
+  return false;
 }
 
 /**
@@ -219,7 +248,36 @@ type RequestHandlerExtra = Parameters<
  * 5. **Teardown**: Call {@link teardownResource `teardownResource`} before unmounting iframe
  *
  * @example Basic usage
- * {@includeCode ./app-bridge.examples.ts#AppBridge_basicUsage}
+ * ```ts source="./app-bridge.examples.ts#AppBridge_basicUsage"
+ * // Create MCP client for the server
+ * const client = new Client({
+ *   name: "MyHost",
+ *   version: "1.0.0",
+ * });
+ * await client.connect(serverTransport);
+ *
+ * // Create bridge for the View
+ * const bridge = new AppBridge(
+ *   client,
+ *   { name: "MyHost", version: "1.0.0" },
+ *   { openLinks: {}, serverTools: {}, logging: {} },
+ * );
+ *
+ * // Set up iframe and connect
+ * const iframe = document.getElementById("app") as HTMLIFrameElement;
+ * const transport = new PostMessageTransport(
+ *   iframe.contentWindow!,
+ *   iframe.contentWindow!,
+ * );
+ *
+ * bridge.oninitialized = () => {
+ *   console.log("View initialized");
+ *   // Now safe to send tool input
+ *   bridge.sendToolInput({ arguments: { location: "NYC" } });
+ * };
+ *
+ * await bridge.connect(transport);
+ * ```
  */
 export class AppBridge extends Protocol<
   AppRequest,
@@ -242,10 +300,26 @@ export class AppBridge extends Protocol<
    * @param options - Configuration options (inherited from Protocol)
    *
    * @example With MCP client (automatic forwarding)
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_constructor_withMcpClient}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_constructor_withMcpClient"
+   * const bridge = new AppBridge(
+   *   mcpClient,
+   *   { name: "MyHost", version: "1.0.0" },
+   *   { openLinks: {}, serverTools: {}, logging: {} },
+   * );
+   * ```
    *
    * @example Without MCP client (manual handlers)
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_constructor_withoutMcpClient}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_constructor_withoutMcpClient"
+   * const bridge = new AppBridge(
+   *   null,
+   *   { name: "MyHost", version: "1.0.0" },
+   *   { openLinks: {}, serverTools: {}, logging: {} },
+   * );
+   * bridge.oncalltool = async (params, extra) => {
+   *   // Handle tool calls manually
+   *   return { content: [] };
+   * };
+   * ```
    */
   constructor(
     private _client: Client | null,
@@ -284,7 +358,14 @@ export class AppBridge extends Protocol<
    * @returns view capabilities, or `undefined` if not yet initialized
    *
    * @example Check view capabilities after initialization
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_getAppCapabilities_checkAfterInit}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_getAppCapabilities_checkAfterInit"
+   * bridge.oninitialized = () => {
+   *   const caps = bridge.getAppCapabilities();
+   *   if (caps?.tools) {
+   *     console.log("View provides tools");
+   *   }
+   * };
+   * ```
    *
    * @see {@link McpUiAppCapabilities `McpUiAppCapabilities`} for the capabilities structure
    */
@@ -301,7 +382,14 @@ export class AppBridge extends Protocol<
    * @returns view implementation info, or `undefined` if not yet initialized
    *
    * @example Log view information after initialization
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_getAppVersion_logAfterInit}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_getAppVersion_logAfterInit"
+   * bridge.oninitialized = () => {
+   *   const appInfo = bridge.getAppVersion();
+   *   if (appInfo) {
+   *     console.log(`View: ${appInfo.name} v${appInfo.version}`);
+   *   }
+   * };
+   * ```
    */
   getAppVersion(): Implementation | undefined {
     return this._appInfo;
@@ -321,7 +409,11 @@ export class AppBridge extends Protocol<
    * @param extra - Request metadata (abort signal, session info)
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_onping_handleRequest}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_onping_handleRequest"
+   * bridge.onping = (params, extra) => {
+   *   console.log("Received ping from view");
+   * };
+   * ```
    */
   onping?: (params: PingRequest["params"], extra: RequestHandlerExtra) => void;
 
@@ -336,7 +428,16 @@ export class AppBridge extends Protocol<
    * host container dimension changes, use {@link setHostContext `setHostContext`}.
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_onsizechange_handleResize}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_onsizechange_handleResize"
+   * bridge.onsizechange = ({ width, height }) => {
+   *   if (width != null) {
+   *     iframe.style.width = `${width}px`;
+   *   }
+   *   if (height != null) {
+   *     iframe.style.height = `${height}px`;
+   *   }
+   * };
+   * ```
    *
    * @see {@link McpUiSizeChangedNotification `McpUiSizeChangedNotification`} for the notification type
    * @see {@link app!App.sendSizeChanged `App.sendSizeChanged`} - the View method that sends these notifications
@@ -394,7 +495,12 @@ export class AppBridge extends Protocol<
    * initialization handshake and is ready to receive tool input and other data.
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_oninitialized_sendToolInput}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_oninitialized_sendToolInput"
+   * bridge.oninitialized = () => {
+   *   console.log("View ready");
+   *   bridge.sendToolInput({ arguments: toolArgs });
+   * };
+   * ```
    *
    * @see {@link McpUiInitializedNotification `McpUiInitializedNotification`} for the notification type
    * @see {@link sendToolInput `sendToolInput`} for sending tool arguments to the View
@@ -426,7 +532,17 @@ export class AppBridge extends Protocol<
    *   - Returns: `Promise<McpUiMessageResult>` with optional `isError` flag
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_onmessage_logMessage}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_onmessage_logMessage"
+   * bridge.onmessage = async ({ role, content }, extra) => {
+   *   try {
+   *     await chatManager.addMessage({ role, content, source: "app" });
+   *     return {}; // Success
+   *   } catch (error) {
+   *     console.error("Failed to add message:", error);
+   *     return { isError: true };
+   *   }
+   * };
+   * ```
    *
    * @see {@link McpUiMessageRequest `McpUiMessageRequest`} for the request type
    * @see {@link McpUiMessageResult `McpUiMessageResult`} for the result type
@@ -476,7 +592,26 @@ export class AppBridge extends Protocol<
    *   - Returns: `Promise<McpUiOpenLinkResult>` with optional `isError` flag
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_onopenlink_handleRequest}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_onopenlink_handleRequest"
+   * bridge.onopenlink = async ({ url }, extra) => {
+   *   if (!isAllowedDomain(url)) {
+   *     console.warn("Blocked external link:", url);
+   *     return { isError: true };
+   *   }
+   *
+   *   const confirmed = await showDialog({
+   *     message: `Open external link?\n${url}`,
+   *     buttons: ["Open", "Cancel"],
+   *   });
+   *
+   *   if (confirmed) {
+   *     window.open(url, "_blank", "noopener,noreferrer");
+   *     return {};
+   *   }
+   *
+   *   return { isError: true };
+   * };
+   * ```
    *
    * @see {@link McpUiOpenLinkRequest `McpUiOpenLinkRequest`} for the request type
    * @see {@link McpUiOpenLinkResult `McpUiOpenLinkResult`} for the result type
@@ -515,7 +650,14 @@ export class AppBridge extends Protocol<
    *   - Returns: `Promise<McpUiRequestDisplayModeResult>` with the actual mode set
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_onrequestdisplaymode_handleRequest}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_onrequestdisplaymode_handleRequest"
+   * bridge.onrequestdisplaymode = async ({ mode }, extra) => {
+   *   if (availableDisplayModes.includes(mode)) {
+   *     currentDisplayMode = mode;
+   *   }
+   *   return { mode: currentDisplayMode };
+   * };
+   * ```
    *
    * @see {@link McpUiRequestDisplayModeRequest `McpUiRequestDisplayModeRequest`} for the request type
    * @see {@link McpUiRequestDisplayModeResult `McpUiRequestDisplayModeResult`} for the result type
@@ -551,7 +693,14 @@ export class AppBridge extends Protocol<
    *   - `params.data` - Log message and optional structured data
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_onloggingmessage_handleLog}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_onloggingmessage_handleLog"
+   * bridge.onloggingmessage = ({ level, logger, data }) => {
+   *   console[level === "error" ? "error" : "log"](
+   *     `[${logger ?? "View"}] ${level.toUpperCase()}:`,
+   *     data,
+   *   );
+   * };
+   * ```
    */
   set onloggingmessage(
     callback: (params: LoggingMessageNotification["params"]) => void,
@@ -577,7 +726,16 @@ export class AppBridge extends Protocol<
    * update received.
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_onupdatemodelcontext_storeContext}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_onupdatemodelcontext_storeContext"
+   * bridge.onupdatemodelcontext = async (
+   *   { content, structuredContent },
+   *   extra,
+   * ) => {
+   *   // Store the context snapshot for inclusion in the next model request
+   *   modelContextManager.update({ content, structuredContent });
+   *   return {};
+   * };
+   * ```
    *
    * @see {@link McpUiUpdateModelContextRequest `McpUiUpdateModelContextRequest`} for the request type
    */
@@ -624,7 +782,15 @@ export class AppBridge extends Protocol<
    *   - `extra` - Request metadata (abort signal, session info)
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_oncalltool_forwardToServer}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_oncalltool_forwardToServer"
+   * bridge.oncalltool = async (params, extra) => {
+   *   return mcpClient.request(
+   *     { method: "tools/call", params },
+   *     CallToolResultSchema,
+   *     { signal: extra.signal },
+   *   );
+   * };
+   * ```
    *
    * @see `CallToolRequest` from @modelcontextprotocol/sdk for the request type
    * @see `CallToolResult` from @modelcontextprotocol/sdk for the result type
@@ -679,7 +845,15 @@ export class AppBridge extends Protocol<
    *   - `extra` - Request metadata (abort signal, session info)
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_onlistresources_returnResources}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_onlistresources_returnResources"
+   * bridge.onlistresources = async (params, extra) => {
+   *   return mcpClient.request(
+   *     { method: "resources/list", params },
+   *     ListResourcesResultSchema,
+   *     { signal: extra.signal },
+   *   );
+   * };
+   * ```
    *
    * @see `ListResourcesRequest` from @modelcontextprotocol/sdk for the request type
    * @see `ListResourcesResult` from @modelcontextprotocol/sdk for the result type
@@ -751,7 +925,15 @@ export class AppBridge extends Protocol<
    *   - `extra` - Request metadata (abort signal, session info)
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_onreadresource_returnResource}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_onreadresource_returnResource"
+   * bridge.onreadresource = async (params, extra) => {
+   *   return mcpClient.request(
+   *     { method: "resources/read", params },
+   *     ReadResourceResultSchema,
+   *     { signal: extra.signal },
+   *   );
+   * };
+   * ```
    *
    * @see `ReadResourceRequest` from @modelcontextprotocol/sdk for the request type
    * @see `ReadResourceResult` from @modelcontextprotocol/sdk for the result type
@@ -811,7 +993,15 @@ export class AppBridge extends Protocol<
    *   - `extra` - Request metadata (abort signal, session info)
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_onlistprompts_returnPrompts}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_onlistprompts_returnPrompts"
+   * bridge.onlistprompts = async (params, extra) => {
+   *   return mcpClient.request(
+   *     { method: "prompts/list", params },
+   *     ListPromptsResultSchema,
+   *     { signal: extra.signal },
+   *   );
+   * };
+   * ```
    *
    * @see `ListPromptsRequest` from @modelcontextprotocol/sdk for the request type
    * @see `ListPromptsResult` from @modelcontextprotocol/sdk for the result type
@@ -947,10 +1137,17 @@ export class AppBridge extends Protocol<
    * @param hostContext - The complete new host context state
    *
    * @example Update theme when user toggles dark mode
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_setHostContext_updateTheme}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_setHostContext_updateTheme"
+   * bridge.setHostContext({ theme: "dark" });
+   * ```
    *
    * @example Update multiple context fields
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_setHostContext_updateMultiple}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_setHostContext_updateMultiple"
+   * bridge.setHostContext({
+   *   theme: "dark",
+   *   containerDimensions: { maxHeight: 600, width: 800 },
+   * });
+   * ```
    *
    * @see {@link McpUiHostContext `McpUiHostContext`} for the context structure
    * @see {@link McpUiHostContextChangedNotification `McpUiHostContextChangedNotification`} for the notification type
@@ -1003,7 +1200,13 @@ export class AppBridge extends Protocol<
    * @param params - Complete tool call arguments
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_sendToolInput_afterInit}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_sendToolInput_afterInit"
+   * bridge.oninitialized = () => {
+   *   bridge.sendToolInput({
+   *     arguments: { location: "New York", units: "metric" },
+   *   });
+   * };
+   * ```
    *
    * @see {@link McpUiToolInputNotification `McpUiToolInputNotification`} for the notification type
    * @see {@link oninitialized `oninitialized`} for the initialization callback
@@ -1030,7 +1233,17 @@ export class AppBridge extends Protocol<
    * @param params - Partial tool call arguments (may be incomplete)
    *
    * @example Stream partial arguments as they arrive
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_sendToolInputPartial_streaming}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_sendToolInputPartial_streaming"
+   * // As streaming progresses...
+   * bridge.sendToolInputPartial({ arguments: { loc: "N" } });
+   * bridge.sendToolInputPartial({ arguments: { location: "New" } });
+   * bridge.sendToolInputPartial({ arguments: { location: "New York" } });
+   *
+   * // When complete, send final input
+   * bridge.sendToolInput({
+   *   arguments: { location: "New York", units: "metric" },
+   * });
+   * ```
    *
    * @see {@link McpUiToolInputPartialNotification `McpUiToolInputPartialNotification`} for the notification type
    * @see {@link sendToolInput `sendToolInput`} for sending complete arguments
@@ -1053,7 +1266,13 @@ export class AppBridge extends Protocol<
    * @param params - Standard MCP tool execution result
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_sendToolResult_afterExecution}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_sendToolResult_afterExecution"
+   * const result = await mcpClient.request(
+   *   { method: "tools/call", params: { name: "get_weather", arguments: args } },
+   *   CallToolResultSchema,
+   * );
+   * bridge.sendToolResult(result);
+   * ```
    *
    * @see {@link McpUiToolResultNotification `McpUiToolResultNotification`} for the notification type
    * @see {@link sendToolInput `sendToolInput`} for sending tool arguments before results
@@ -1077,10 +1296,19 @@ export class AppBridge extends Protocol<
    *   - `reason`: Human-readable explanation for why the tool was cancelled
    *
    * @example User-initiated cancellation
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_sendToolCancelled_userInitiated}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_sendToolCancelled_userInitiated"
+   * // User clicked "Cancel" button
+   * bridge.sendToolCancelled({ reason: "User cancelled the operation" });
+   * ```
    *
    * @example System-level cancellation
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_sendToolCancelled_systemLevel}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_sendToolCancelled_systemLevel"
+   * // Sampling error or timeout
+   * bridge.sendToolCancelled({ reason: "Request timeout after 30 seconds" });
+   *
+   * // Classifier intervention
+   * bridge.sendToolCancelled({ reason: "Content policy violation detected" });
+   * ```
    *
    * @see {@link McpUiToolCancelledNotification `McpUiToolCancelledNotification`} for the notification type
    * @see {@link sendToolResult `sendToolResult`} for sending successful results
@@ -1131,7 +1359,15 @@ export class AppBridge extends Protocol<
    * @returns Promise resolving when view confirms readiness for teardown
    *
    * @example
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_teardownResource_gracefulShutdown}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_teardownResource_gracefulShutdown"
+   * try {
+   *   await bridge.teardownResource({});
+   *   // View is ready, safe to unmount iframe
+   *   iframe.remove();
+   * } catch (error) {
+   *   console.error("Teardown failed:", error);
+   * }
+   * ```
    */
   teardownResource(
     params: McpUiResourceTeardownRequest["params"],
@@ -1176,10 +1412,33 @@ export class AppBridge extends Protocol<
    *   before calling `bridge.connect()`.
    *
    * @example With MCP client (automatic forwarding)
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_connect_withMcpClient}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_connect_withMcpClient"
+   * const bridge = new AppBridge(mcpClient, hostInfo, capabilities);
+   * const transport = new PostMessageTransport(
+   *   iframe.contentWindow!,
+   *   iframe.contentWindow!,
+   * );
+   *
+   * bridge.oninitialized = () => {
+   *   console.log("View ready");
+   *   bridge.sendToolInput({ arguments: toolArgs });
+   * };
+   *
+   * await bridge.connect(transport);
+   * ```
    *
    * @example Without MCP client (manual handlers)
-   * {@includeCode ./app-bridge.examples.ts#AppBridge_connect_withoutMcpClient}
+   * ```ts source="./app-bridge.examples.ts#AppBridge_connect_withoutMcpClient"
+   * const bridge = new AppBridge(null, hostInfo, capabilities);
+   *
+   * // Register handlers manually
+   * bridge.oncalltool = async (params, extra) => {
+   *   // Custom tool call handling
+   *   return { content: [] };
+   * };
+   *
+   * await bridge.connect(transport);
+   * ```
    */
   async connect(transport: Transport) {
     if (this._client) {

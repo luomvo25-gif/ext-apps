@@ -31,6 +31,24 @@ Add to your MCP client configuration (stdio transport):
 }
 ```
 
+### Local Development
+
+To test local modifications, use this configuration (replace `~/code/ext-apps` with your clone path):
+
+```json
+{
+  "mcpServers": {
+    "budget-allocator": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "cd ~/code/ext-apps/examples/budget-allocator-server && npm run build >&2 && node dist/index.js --stdio"
+      ]
+    }
+  }
+}
+```
+
 ## Features
 
 - **Interactive Sliders**: Adjust budget allocation across 5 categories (Marketing, Engineering, Operations, Sales, R&D)

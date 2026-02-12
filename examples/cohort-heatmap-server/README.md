@@ -31,6 +31,24 @@ Add to your MCP client configuration (stdio transport):
 }
 ```
 
+### Local Development
+
+To test local modifications, use this configuration (replace `~/code/ext-apps` with your clone path):
+
+```json
+{
+  "mcpServers": {
+    "cohort-heatmap": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "cd ~/code/ext-apps/examples/cohort-heatmap-server && npm run build >&2 && node dist/index.js --stdio"
+      ]
+    }
+  }
+}
+```
+
 ## Features
 
 - **Cohort Retention Heatmap**: Color-coded grid showing retention percentages across cohorts and time periods

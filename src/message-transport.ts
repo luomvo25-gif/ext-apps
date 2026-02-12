@@ -24,10 +24,20 @@ import {
  * ## Usage
  *
  * **View**:
- * {@includeCode ./message-transport.examples.ts#PostMessageTransport_view}
+ * ```ts source="./message-transport.examples.ts#PostMessageTransport_view"
+ * const transport = new PostMessageTransport(window.parent, window.parent);
+ * await app.connect(transport);
+ * ```
  *
  * **Host**:
- * {@includeCode ./message-transport.examples.ts#PostMessageTransport_host}
+ * ```ts source="./message-transport.examples.ts#PostMessageTransport_host"
+ * const iframe = document.getElementById("app-iframe") as HTMLIFrameElement;
+ * const transport = new PostMessageTransport(
+ *   iframe.contentWindow!,
+ *   iframe.contentWindow!,
+ * );
+ * await bridge.connect(transport);
+ * ```
  *
  * @see {@link app!App.connect `App.connect`} for View usage
  * @see {@link app-bridge!AppBridge.connect `AppBridge.connect`} for Host usage
@@ -46,10 +56,18 @@ export class PostMessageTransport implements Transport {
    *   `window.parent`. For hosts, pass `iframe.contentWindow`.
    *
    * @example View connecting to parent
-   * {@includeCode ./message-transport.examples.ts#PostMessageTransport_constructor_view}
+   * ```ts source="./message-transport.examples.ts#PostMessageTransport_constructor_view"
+   * const transport = new PostMessageTransport(window.parent, window.parent);
+   * ```
    *
    * @example Host connecting to iframe
-   * {@includeCode ./message-transport.examples.ts#PostMessageTransport_constructor_host}
+   * ```ts source="./message-transport.examples.ts#PostMessageTransport_constructor_host"
+   * const iframe = document.getElementById("app-iframe") as HTMLIFrameElement;
+   * const transport = new PostMessageTransport(
+   *   iframe.contentWindow!,
+   *   iframe.contentWindow!,
+   * );
+   * ```
    */
   constructor(
     private eventTarget: Window = window.parent,
@@ -64,7 +82,17 @@ export class PostMessageTransport implements Transport {
       if (parsed.success) {
         console.debug("Parsed message", parsed.data);
         this.onmessage?.(parsed.data);
+      } else if (event.data?.jsonrpc !== "2.0") {
+        // Not a JSON-RPC message at all (e.g. internal frames injected by
+        // the host environment). Ignore silently so the transport stays alive.
+        console.debug(
+          "Ignoring non-JSON-RPC message",
+          parsed.error.message,
+          event,
+        );
       } else {
+        // Has jsonrpc: "2.0" but is otherwise malformed — surface as a real
+        // protocol error.
         console.error("Failed to parse message", parsed.error.message, event);
         this.onerror?.(
           new Error(

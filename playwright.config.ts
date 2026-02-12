@@ -5,7 +5,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 2 : 4, // Parallel execution now works with factory pattern
+  workers: process.env.CI ? 2 : 16, // Parallel execution now works with factory pattern
   timeout: 30000, // 30s per test
   reporter: process.env.CI ? "list" : "html",
   // Use platform-agnostic snapshot names (no -darwin/-linux suffix)

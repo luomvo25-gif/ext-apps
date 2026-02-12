@@ -31,6 +31,24 @@ Add to your MCP client configuration (stdio transport):
 }
 ```
 
+### Local Development
+
+To test local modifications, use this configuration (replace `~/code/ext-apps` with your clone path):
+
+```json
+{
+  "mcpServers": {
+    "customer-segmentation": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "cd ~/code/ext-apps/examples/customer-segmentation-server && npm run build >&2 && node dist/index.js --stdio"
+      ]
+    }
+  }
+}
+```
+
 ## Features
 
 - **Interactive Scatter Plot**: Bubble chart visualization using Chart.js with configurable X/Y axes

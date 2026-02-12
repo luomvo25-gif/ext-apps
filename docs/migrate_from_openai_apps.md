@@ -4,9 +4,16 @@ title: Migrate OpenAI App
 
 # Migrating from OpenAI Apps SDK to MCP Apps SDK
 
-This guide helps you migrate from the OpenAI Apps SDK to the MCP Apps SDK (`@modelcontextprotocol/ext-apps`).
+This reference maps OpenAI Apps SDK concepts to their MCP Apps SDK (`@modelcontextprotocol/ext-apps`) equivalents. Use the tables below for quick lookup during migration, and refer to the code examples for complete before/after comparisons.
+
+This guide covers server-side changes first (metadata, tools, resources), then client-side changes (setup, context, events).
+
+> [!NOTE]
+> Some OpenAI Apps SDK features don't have MCP equivalents yet. These are marked "Not yet implemented" in the tables below.
 
 ## Server-Side
+
+The server-side changes involve updating metadata structure and using helper functions.
 
 ### Quick Start Comparison
 
@@ -190,6 +197,8 @@ function createServer() {
 
 ## Client-Side
 
+Client-side migration involves replacing the implicit `window.openai` global with an explicit `App` instance.
+
 ### Quick Start Comparison
 
 | OpenAI Apps SDK                   | MCP Apps SDK                       |
@@ -282,16 +291,17 @@ function createServer() {
 | ------------------------------------------- | -------- | ------------------- |
 | `await window.openai.requestModal(options)` | —        | Not yet implemented |
 | `window.openai.requestClose()`              | —        | Not yet implemented |
+| `window.openai.setOpenInAppUrl({ href })`   | —        | Not yet implemented |
 | `window.openai.view`                        | —        | Not yet mapped      |
 
 ### Event Handling
 
-| OpenAI                         | MCP Apps                                    | Notes                            |
-| ------------------------------ | ------------------------------------------- | -------------------------------- |
-| Read `window.openai.*` on load | `app.ontoolinput = (params) => {...}`       | Register before `connect()`      |
-| Read `window.openai.*` on load | `app.ontoolresult = (params) => {...}`      | Register before `connect()`      |
-| Poll or re-read properties     | `app.onhostcontextchanged = (ctx) => {...}` | MCP pushes context changes       |
-| —                              | `app.onteardown = async () => {...}`        | MCP adds: cleanup before unmount |
+| OpenAI                                        | MCP Apps                                    | Notes                                                              |
+| --------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------ |
+| `window.openai.toolInput` (read on load)      | `app.ontoolinput = (params) => {...}`       | OpenAI: sync property; MCP: callback (register before `connect()`) |
+| `window.openai.toolOutput` (read on load)     | `app.ontoolresult = (params) => {...}`      | OpenAI: sync property; MCP: callback (register before `connect()`) |
+| `addEventListener("openai:set_globals", ...)` | `app.onhostcontextchanged = (ctx) => {...}` | Both push updates; MCP uses callback, OpenAI uses DOM event        |
+| —                                             | `app.onteardown = async () => {...}`        | MCP adds: cleanup before unmount                                   |
 
 ### Logging
 

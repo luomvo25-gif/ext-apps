@@ -31,6 +31,24 @@ Add to your MCP client configuration (stdio transport):
 }
 ```
 
+### Local Development
+
+To test local modifications, use this configuration (replace `~/code/ext-apps` with your clone path):
+
+```json
+{
+  "mcpServers": {
+    "system-monitor": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "cd ~/code/ext-apps/examples/system-monitor-server && npm run build >&2 && node dist/index.js --stdio"
+      ]
+    }
+  }
+}
+```
+
 ## Features
 
 - **Per-Core CPU Monitoring**: Stacked area chart showing individual CPU core utilization over a 1-minute sliding window
@@ -61,18 +79,24 @@ Add to your MCP client configuration (stdio transport):
 
 ### Server (`server.ts`)
 
-Exposes a single `get-system-stats` tool that returns:
+Exposes two tools demonstrating a polling pattern:
 
-- Raw per-core CPU timing data (idle/total counters)
-- Memory usage (used/total/percentage)
-- System info (hostname, platform, uptime)
+1. **`get-system-info`** (Model-visible) — Returns static system configuration:
+   - Hostname, platform, architecture
+   - CPU model and core count
+   - Total memory
 
-The tool is linked to a UI resource via `_meta.ui.resourceUri`.
+2. **`poll-system-stats`** (App-only, `visibility: ["app"]`) — Returns dynamic metrics:
+   - Per-core CPU timing data (idle/total counters)
+   - Memory usage (used/free/percentage)
+   - Uptime
+
+The Model-visible tool is linked to a UI resource via `_meta.ui.resourceUri`.
 
 ### App (`src/mcp-app.ts`)
 
+- Receives static system info via `ontoolresult` when the host sends the `get-system-info` result
+- Polls `poll-system-stats` every 2 seconds for dynamic metrics
 - Uses Chart.js for the stacked area chart visualization
-- Polls the server tool every 2 seconds
 - Computes CPU usage percentages client-side from timing deltas
 - Maintains a 30-point history (1 minute at 2s intervals)
-- Updates all UI elements on each poll

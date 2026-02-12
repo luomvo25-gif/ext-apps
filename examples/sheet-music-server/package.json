@@ -1,6 +1,6 @@
 {
   "name": "@modelcontextprotocol/server-sheet-music",
-  "version": "0.4.1",
+  "version": "1.0.1",
   "type": "module",
   "description": "MCP App Server for rendering and playing sheet music from ABC notation",
   "repository": {
@@ -18,11 +18,11 @@
     "watch": "cross-env INPUT=mcp-app.html vite build --watch",
     "serve": "bun --watch main.ts",
     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
-    "dev": "cross-env NODE_ENV=development concurrently 'npm run watch' 'npm run serve'",
+    "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/ext-apps": "^0.4.1",
+    "@modelcontextprotocol/ext-apps": "^1.0.0",
     "@modelcontextprotocol/sdk": "^1.24.0",
     "abcjs": "^6.4.4",
     "cors": "^2.8.5",
@@ -32,7 +32,7 @@
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.0",
-    "@types/node": "^22.0.0",
+    "@types/node": "22.10.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "typescript": "^5.9.3",

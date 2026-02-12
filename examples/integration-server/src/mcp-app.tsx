@@ -152,7 +152,7 @@ function GetTimeAppInner({
       <div className={styles.action}>
         <p>
           <strong>Server Time:</strong>{" "}
-          <code id="server-time">{serverTime}</code>
+          <code className={styles.serverTime}>{serverTime}</code>
         </p>
         <button onClick={handleGetTime}>Get Server Time</button>
       </div>

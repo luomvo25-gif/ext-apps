@@ -10,7 +10,7 @@ Key abstractions:
 - **Host** - Chat client embedding the iframe, uses `AppBridge` class to proxy MCP requests
 - **Server** - MCP server that registers tools/resources with UI metadata
 
-Specification (draft): `specification/draft/apps.mdx`
+Specification (stable): `specification/2026-01-26/apps.mdx`
 
 ## Commands
 
@@ -80,9 +80,9 @@ View (App) <--PostMessageTransport--> Host (AppBridge) <--MCP Client--> MCP Serv
 
 ## Documentation
 
-JSDoc `@example` tags use `{@includeCode ./file.examples.ts#regionName}` to pull in type-checked code from companion `.examples.ts`/`.examples.tsx` files. Regions are marked with `//#region name` and `//#endregion name`, wrapped in functions (whose parameters provide types for external values). Region names follow `exportedName_variant` or `ClassName_methodName_variant` pattern (e.g., `useApp_basicUsage`, `App_hostCapabilities_checkAfterConnection`).
+JSDoc `@example` tags should pull type-checked code from companion `.examples.ts` files (e.g., `app.ts` → `app.examples.ts`). Use ` ```ts source="./file.examples.ts#regionName" ` fences referencing `//#region regionName` blocks; region names follow `exportedName_variant` or `ClassName_methodName_variant` pattern (e.g., `useApp_basicUsage`, `App_hostCapabilities_checkAfterConnection`). For whole-file inclusion (any file type), omit the `#regionName`. Run `npm run sync:snippets` to sync.
 
-Standalone docs in `docs/` (listed in `typedoc.config.mjs` `projectDocuments`) can also have type-checked companion `.ts`/`.tsx` files using the same `@includeCode` pattern.
+Standalone docs in `docs/` (listed in `typedoc.config.mjs` `projectDocuments`) can also have type-checked companion `.ts`/`.tsx` files using the same pattern.
 
 ## Full Examples
 

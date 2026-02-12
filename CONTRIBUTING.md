@@ -79,6 +79,16 @@ npm run test:e2e:update -- --grep "Three.js"
 
 **Note**: Golden screenshots are platform-agnostic. Tests use canvas masking and tolerance thresholds to handle minor cross-platform rendering differences.
 
+#### Updating Snapshots in CI
+
+If E2E tests fail in CI due to screenshot mismatches, you can update snapshots directly from your PR:
+
+1. Comment `/update-snapshots` on the PR
+2. The workflow will update snapshots and push to your branch
+3. A comment will confirm when complete
+
+Alternatively, use the [workflow dispatch](https://github.com/modelcontextprotocol/ext-apps/actions/workflows/update-snapshots.yml) to manually trigger updates for any branch.
+
 ## Code of Conduct
 
 This project follows our [Code of Conduct](CODE_OF_CONDUCT.md). Please review it before contributing.

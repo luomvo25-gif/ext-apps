@@ -1,5 +1,5 @@
 ---
-name: Create MCP App
+name: create-mcp-app
 description: This skill should be used when the user asks to "create an MCP App", "add a UI to an MCP tool", "build an interactive MCP View", "scaffold an MCP App", or needs guidance on MCP Apps SDK patterns, UI-resource registration, MCP App lifecycle, or host integration. Provides comprehensive guidance for building MCP Apps with interactive UIs.
 ---
 
@@ -216,7 +216,7 @@ app.onhostcontextchanged = (ctx) => {
 
 For large tool inputs, use `ontoolinputpartial` to show progress during LLM generation. The partial JSON is healed (always valid), enabling progressive UI updates.
 
-**Spec:** [ui/notifications/tool-input-partial](https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/draft/apps.mdx#streaming-tool-input)
+**Spec:** [ui/notifications/tool-input-partial](https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx#streaming-tool-input)
 
 ```typescript
 app.ontoolinputpartial = (params) => {

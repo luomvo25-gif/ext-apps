@@ -1,6 +1,6 @@
 # MCP Apps Plugin for Claude Code
 
-A Claude Code plugin that provides the "Create MCP App" skill for building MCP Apps with interactive UIs.
+A Claude Code plugin that provides skills for building MCP Apps.
 
 ## Installation
 

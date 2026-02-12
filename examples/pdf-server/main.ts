@@ -23,19 +23,13 @@ import {
   DEFAULT_PDF,
 } from "./server.js";
 
-export interface ServerOptions {
-  port: number;
-  name?: string;
-}
-
 /**
  * Starts an MCP server with Streamable HTTP transport in stateless mode.
  */
-export async function startServer(
+export async function startStreamableHTTPServer(
   createServer: () => McpServer,
-  options: ServerOptions,
 ): Promise<void> {
-  const { port, name = "MCP Server" } = options;
+  const port = parseInt(process.env.PORT ?? "3001", 10);
 
   const app = createMcpExpressApp({ host: "0.0.0.0" });
   app.use(cors());
@@ -71,7 +65,7 @@ export async function startServer(
       console.error("Failed to start server:", err);
       process.exit(1);
     }
-    console.log(`${name} listening on http://localhost:${port}/mcp`);
+    console.log(`MCP server listening on http://localhost:${port}/mcp`);
   });
 
   const shutdown = () => {
@@ -81,6 +75,17 @@ export async function startServer(
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+}
+
+/**
+ * Starts an MCP server with stdio transport.
+ *
+ * @param createServer - Factory function that creates a new McpServer instance.
+ */
+export async function startStdioServer(
+  createServer: () => McpServer,
+): Promise<void> {
+  await createServer().connect(new StdioServerTransport());
 }
 
 function parseArgs(): { urls: string[]; stdio: boolean } {
@@ -132,10 +137,9 @@ async function main() {
   );
 
   if (stdio) {
-    await createServer().connect(new StdioServerTransport());
+    await startStdioServer(createServer);
   } else {
-    const port = parseInt(process.env.PORT ?? "3120", 10);
-    await startServer(createServer, { port, name: "PDF Server" });
+    await startStreamableHTTPServer(createServer);
   }
 }
 

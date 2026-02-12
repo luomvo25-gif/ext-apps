@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
-#     "mcp @ git+https://github.com/modelcontextprotocol/python-sdk@main",
+#     "mcp>=1.26.0",
 #     "qrcode[pil]>=8.0",
 #     "uvicorn>=0.34.0",
 #     "starlette>=0.46.0",
@@ -24,9 +24,9 @@ from starlette.middleware.cors import CORSMiddleware
 
 VIEW_URI = "ui://qr-server/view.html"
 HOST = os.environ.get("HOST", "0.0.0.0")  # 0.0.0.0 for Docker compatibility
-PORT = int(os.environ.get("PORT", "3108"))
+PORT = int(os.environ.get("PORT", "3001"))
 
-mcp = FastMCP("QR Code Server")
+mcp = FastMCP("QR Code Server", stateless_http=True)
 
 # Embedded View HTML for self-contained usage (uv run <url> or unbundled)
 EMBEDDED_VIEW_HTML = """<!DOCTYPE html>
@@ -161,7 +161,7 @@ if __name__ == "__main__":
         mcp.run(transport="stdio")
     else:
         # HTTP mode for basic-host (default) - with CORS
-        app = mcp.streamable_http_app(stateless_http=True)
+        app = mcp.streamable_http_app()
         app.add_middleware(
             CORSMiddleware,
             allow_origins=["*"],
