@@ -238,7 +238,9 @@ export default function ThreeJSApp({
     const newMode = isFullscreen ? "inline" : "fullscreen";
     try {
       const result = await app.requestDisplayMode({ mode: newMode });
-      setCurrentDisplayMode(result.mode as "inline" | "fullscreen");
+      if (result.mode === newMode) {
+        setCurrentDisplayMode(result.mode);
+      }
     } catch {
       // ignore
     }
