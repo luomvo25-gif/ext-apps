@@ -28,7 +28,8 @@
   }
 }
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   background: var(--color-bg);
@@ -122,8 +123,13 @@ html, body {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 /* Section titles */
@@ -176,7 +182,9 @@ html, body {
   width: 0%;
   background: var(--color-success);
   border-radius: 10px;
-  transition: width 0.3s ease, background 0.3s ease;
+  transition:
+    width 0.3s ease,
+    background 0.3s ease;
 }
 
 .memory-bar-fill.warning {

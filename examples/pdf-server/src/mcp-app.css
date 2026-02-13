@@ -13,7 +13,10 @@
   --text200: light-dark(#999999, #888888);
 
   /* Shadows */
-  --shadow-page: light-dark(0 2px 8px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.4));
+  --shadow-page: light-dark(
+    0 2px 8px rgba(0, 0, 0, 0.15),
+    0 2px 8px rgba(0, 0, 0, 0.4)
+  );
   --selection-bg: light-dark(rgba(0, 0, 255, 0.3), rgba(100, 150, 255, 0.4));
 }
 
@@ -294,7 +297,8 @@ body {
   font-size: calc(var(--scale-factor, 1) * var(--font-height));
   --scale-x: 1;
   --rotate: 0deg;
-  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv, 1));
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x))
+    scale(var(--min-font-size-inv, 1));
 }
 
 .text-layer .markedContent {

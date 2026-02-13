@@ -179,7 +179,10 @@
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  transition: background 0.15s, transform 0.1s, opacity 0.15s;
+  transition:
+    background 0.15s,
+    transform 0.1s,
+    opacity 0.15s;
   white-space: nowrap;
 }
 

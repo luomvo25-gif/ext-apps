@@ -49,11 +49,16 @@
     cursor: pointer;
 
     &:hover {
-      background-color: color-mix(in srgb, var(--color-accent) 85%, var(--color-background-inverse));
+      background-color: color-mix(
+        in srgb,
+        var(--color-accent) 85%,
+        var(--color-background-inverse)
+      );
     }
 
     &:focus-visible {
-      outline: calc(var(--border-width-regular) * 2) solid var(--color-ring-primary);
+      outline: calc(var(--border-width-regular) * 2) solid
+        var(--color-ring-primary);
       outline-offset: var(--border-width-regular);
     }
   }

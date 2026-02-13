@@ -123,17 +123,39 @@
   margin-right: 0.5rem;
 }
 
-.log-type.ontoolinput { color: var(--color-primary); }
-.log-type.ontoolinputpartial { color: #8b5cf6; }
-.log-type.ontoolresult { color: var(--color-success); }
-.log-type.ontoolcancelled { color: var(--color-warning); }
-.log-type.onhostcontextchanged { color: #7c3aed; }
-.log-type.onteardown { color: #f97316; }
-.log-type.oncalltool { color: #ec4899; }
-.log-type.onlisttools { color: #14b8a6; }
-.log-type.onerror { color: var(--color-error); }
-.log-type.connected { color: var(--color-success); }
-.log-type.update-context { color: #0891b2; }
+.log-type.ontoolinput {
+  color: var(--color-primary);
+}
+.log-type.ontoolinputpartial {
+  color: #8b5cf6;
+}
+.log-type.ontoolresult {
+  color: var(--color-success);
+}
+.log-type.ontoolcancelled {
+  color: var(--color-warning);
+}
+.log-type.onhostcontextchanged {
+  color: #7c3aed;
+}
+.log-type.onteardown {
+  color: #f97316;
+}
+.log-type.oncalltool {
+  color: #ec4899;
+}
+.log-type.onlisttools {
+  color: #14b8a6;
+}
+.log-type.onerror {
+  color: var(--color-error);
+}
+.log-type.connected {
+  color: var(--color-success);
+}
+.log-type.update-context {
+  color: #0891b2;
+}
 
 .log-payload-preview {
   color: #6b7280;
@@ -191,8 +213,12 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  .info-group dt { color: #d1d5db; }
-  .info-group dd { color: #9ca3af; }
+  .info-group dt {
+    color: #d1d5db;
+  }
+  .info-group dd {
+    color: #9ca3af;
+  }
 }
 
 .styles-sample {
@@ -275,7 +301,9 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  .action-group h3 { color: #d1d5db; }
+  .action-group h3 {
+    color: #d1d5db;
+  }
 }
 
 .action-row {

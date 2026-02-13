@@ -72,11 +72,19 @@ const progressTextEl = document.getElementById("progress-text")!;
 const searchBtn = document.getElementById("search-btn") as HTMLButtonElement;
 searchBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6.5" cy="6.5" r="4.5"/><line x1="10" y1="10" x2="14" y2="14"/></svg>`;
 const searchBarEl = document.getElementById("search-bar")!;
-const searchInputEl = document.getElementById("search-input") as HTMLInputElement;
+const searchInputEl = document.getElementById(
+  "search-input",
+) as HTMLInputElement;
 const searchMatchCountEl = document.getElementById("search-match-count")!;
-const searchPrevBtn = document.getElementById("search-prev-btn") as HTMLButtonElement;
-const searchNextBtn = document.getElementById("search-next-btn") as HTMLButtonElement;
-const searchCloseBtn = document.getElementById("search-close-btn") as HTMLButtonElement;
+const searchPrevBtn = document.getElementById(
+  "search-prev-btn",
+) as HTMLButtonElement;
+const searchNextBtn = document.getElementById(
+  "search-next-btn",
+) as HTMLButtonElement;
+const searchCloseBtn = document.getElementById(
+  "search-close-btn",
+) as HTMLButtonElement;
 const highlightLayerEl = document.getElementById("highlight-layer")!;
 
 // Search state
@@ -136,7 +144,12 @@ function requestFitToContent() {
   const pageWrapperHeight = pageWrapperEl.offsetHeight;
   const BUFFER = 10; // Buffer for sub-pixel rounding and browser quirks
   const totalHeight =
-    toolbarHeight + searchBarHeight + paddingTop + pageWrapperHeight + paddingBottom + BUFFER;
+    toolbarHeight +
+    searchBarHeight +
+    paddingTop +
+    pageWrapperHeight +
+    paddingBottom +
+    BUFFER;
 
   app.sendSizeChanged({ height: totalHeight });
 }
@@ -259,7 +272,8 @@ function renderHighlights() {
         for (let ri = 0; ri < rects.length; ri++) {
           const r = rects[ri];
           const div = document.createElement("div");
-          div.className = "search-highlight" + (isCurrentMatch ? " current" : "");
+          div.className =
+            "search-highlight" + (isCurrentMatch ? " current" : "");
           div.style.position = "absolute";
           div.style.left = `${r.left - wrapperRect.left}px`;
           div.style.top = `${r.top - wrapperRect.top}px`;
@@ -279,7 +293,8 @@ function renderHighlights() {
   const currentHL = highlightLayerEl.querySelector(
     ".search-highlight.current",
   ) as HTMLElement;
-  if (currentHL) currentHL.scrollIntoView({ block: "center", behavior: "smooth" });
+  if (currentHL)
+    currentHL.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 function clearHighlights() {
