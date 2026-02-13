@@ -892,16 +892,16 @@ pageInputEl.addEventListener("keydown", (e) => {
 
 // Keyboard navigation
 document.addEventListener("keydown", (e) => {
-  // Ctrl/Cmd+F: open our search if closed; if open and empty, close and let browser find through
+  // Ctrl/Cmd+F: open our search if closed; if already focused, pass through to browser find
   if ((e.ctrlKey || e.metaKey) && e.key === "f") {
     if (!searchOpen) {
       e.preventDefault();
       openSearch();
-    } else if (!searchInputEl.value) {
+    } else if (document.activeElement === searchInputEl) {
+      // Already focused — close ours and let browser find open
       closeSearch();
-      // don't preventDefault — let browser's native find open
     } else {
-      // Search is open with text — keep ours focused, don't open browser find
+      // Open but not focused — re-focus our search
       e.preventDefault();
       searchInputEl.focus();
       searchInputEl.select();
