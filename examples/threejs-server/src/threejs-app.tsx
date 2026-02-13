@@ -195,15 +195,10 @@ async function executeThreeCode(
 // =============================================================================
 
 export default function ThreeJSApp({
+  app,
   toolInputs,
   toolInputsPartial,
-  toolResult: _toolResult,
   hostContext,
-  callServerTool: _callServerTool,
-  sendMessage: _sendMessage,
-  openLink: _openLink,
-  sendLog: _sendLog,
-  requestDisplayMode,
 }: ThreeJSAppProps) {
   const [error, setError] = useState<string | null>(null);
   const [currentDisplayMode, setCurrentDisplayMode] = useState<
@@ -242,12 +237,12 @@ export default function ThreeJSApp({
   const toggleFullscreen = useCallback(async () => {
     const newMode = isFullscreen ? "inline" : "fullscreen";
     try {
-      const result = await requestDisplayMode({ mode: newMode });
+      const result = await app.requestDisplayMode({ mode: newMode });
       setCurrentDisplayMode(result.mode as "inline" | "fullscreen");
     } catch {
       // ignore
     }
-  }, [isFullscreen, requestDisplayMode]);
+  }, [isFullscreen, app]);
 
   // Escape key exits fullscreen
   useEffect(() => {
