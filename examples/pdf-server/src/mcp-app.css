@@ -368,8 +368,8 @@ body {
   display: flex;
   align-items: center;
   position: absolute;
-  top: 48px; /* below toolbar */
-  right: 0;
+  top: 47px; /* below toolbar (48px - 1px border overlap) */
+  right: -1px; /* align with outer border */
   padding: 0.375rem 0.5rem;
   background: var(--bg000);
   border: 1px solid var(--bg200);
