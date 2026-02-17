@@ -14,6 +14,7 @@ import {
   copyFileSync,
   chmodSync,
   writeFileSync,
+  statSync,
 } from "fs";
 import { join, dirname } from "path";
 import { spawnSync } from "child_process";
@@ -189,6 +190,26 @@ function extractTar(buffer, destDir) {
   }
 }
 
+function copyFileWithRetry(source, dest, maxRetries = 3, delay = 100) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      copyFileSync(source, dest);
+      return true;
+    } catch (err) {
+      if (attempt === maxRetries) {
+        throw err;
+      }
+      // Wait a bit before retrying (exponential backoff)
+      const waitTime = delay * Math.pow(2, attempt - 1);
+      const start = Date.now();
+      while (Date.now() - start < waitTime) {
+        // Busy wait (simple delay without external dependencies)
+      }
+    }
+  }
+  return false;
+}
+
 function setupBinLink(bunPath) {
   if (!existsSync(binDir)) {
     mkdirSync(binDir, { recursive: true });
@@ -197,17 +218,111 @@ function setupBinLink(bunPath) {
   const bunLink = join(binDir, bunExe);
   const bunxLink = join(binDir, isWindows ? "bunx.exe" : "bunx");
 
-  // Remove existing links
-  for (const link of [bunLink, bunxLink]) {
+  // Check if files already exist and are valid (same size as source)
+  // This can help avoid unnecessary copy operations that might fail
+  let needsCopy = true;
+  if (existsSync(bunLink) && existsSync(bunxLink)) {
     try {
-      unlinkSync(link);
-    } catch {}
+      const sourceStat = statSync(bunPath);
+      const linkStat = statSync(bunLink);
+      if (sourceStat.size === linkStat.size) {
+        console.log(
+          "Bun binaries already exist and appear valid, skipping copy",
+        );
+        needsCopy = false;
+      }
+    } catch {
+      // If stat fails, proceed with copy
+      needsCopy = true;
+    }
+  }
+
+  if (needsCopy) {
+    // Remove existing links
+    for (const link of [bunLink, bunxLink]) {
+      try {
+        unlinkSync(link);
+      } catch {}
+    }
+  } else {
+    console.log(`Bun linked to: ${bunLink}`);
+    return;
   }
 
   if (isWindows) {
     // On Windows, copy the binary (symlinks may not work without admin)
-    copyFileSync(bunPath, bunLink);
-    copyFileSync(bunPath, bunxLink);
+    // Use retry logic to handle file locking issues
+    try {
+      copyFileWithRetry(bunPath, bunLink);
+      copyFileWithRetry(bunPath, bunxLink);
+    } catch (err) {
+      // If copy fails, try using Windows copy command as fallback
+      console.log(`Copy failed, trying Windows copy command: ${err.message}`);
+      try {
+        if (isWindows) {
+          // Use cmd /c copy for Windows with proper path quoting
+          // Paths with spaces need to be quoted, and we need to handle backslashes
+          const sourceQuoted = `"${bunPath}"`;
+          const destQuoted = `"${bunLink}"`;
+          const destxQuoted = `"${bunxLink}"`;
+
+          // Try copying with a small delay between attempts
+          const result1 = spawnSync(
+            "cmd.exe",
+            ["/c", "copy", "/Y", sourceQuoted, destQuoted],
+            { shell: false, stdio: "pipe" },
+          );
+
+          // Small delay before second copy
+          const start = Date.now();
+          while (Date.now() - start < 50) {}
+
+          const result2 = spawnSync(
+            "cmd.exe",
+            ["/c", "copy", "/Y", sourceQuoted, destxQuoted],
+            { shell: false, stdio: "pipe" },
+          );
+
+          if (result1.status !== 0) {
+            const errorMsg =
+              result1.stderr?.toString() ||
+              result1.stdout?.toString() ||
+              "Unknown error";
+            throw new Error(
+              `Windows copy command failed for bun.exe: ${errorMsg}`,
+            );
+          }
+          if (result2.status !== 0) {
+            const errorMsg =
+              result2.stderr?.toString() ||
+              result2.stdout?.toString() ||
+              "Unknown error";
+            throw new Error(
+              `Windows copy command failed for bunx.exe: ${errorMsg}`,
+            );
+          }
+
+          // Verify files were created
+          if (!existsSync(bunLink) || !existsSync(bunxLink)) {
+            throw new Error("Files were not created after copy command");
+          }
+        } else {
+          // Fallback to original copyFileSync if not Windows
+          copyFileSync(bunPath, bunLink);
+          copyFileSync(bunPath, bunxLink);
+        }
+      } catch (fallbackErr) {
+        // If all copy methods fail, log the error but don't throw
+        // The script will exit gracefully and bun can be installed manually
+        console.error(
+          `All copy methods failed. Bun setup incomplete: ${fallbackErr.message}`,
+        );
+        console.error(
+          "You may need to install bun manually or run this script with appropriate permissions.",
+        );
+        throw fallbackErr;
+      }
+    }
   } else {
     // On Unix, use symlinks
     symlinkSync(bunPath, bunLink);

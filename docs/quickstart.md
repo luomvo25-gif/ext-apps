@@ -44,8 +44,11 @@ Configure your [`package.json`](https://github.com/modelcontextprotocol/ext-apps
 ```bash
 npm pkg set type=module
 npm pkg set scripts.build="tsc --noEmit && tsc -p tsconfig.server.json && cross-env INPUT=mcp-app.html vite build"
-npm pkg set scripts.start="concurrently 'cross-env NODE_ENV=development INPUT=mcp-app.html vite build --watch' 'tsx watch main.ts'"
+npm pkg set scripts.start='concurrently "cross-env NODE_ENV=development INPUT=mcp-app.html vite build --watch" "tsx watch main.ts"'
 ```
+
+> [!NOTE]
+> Windows `cmd.exe` users will need to convert quotes in the above command: `npm pkg set scripts.start="concurrently ""cross-env NODE_ENV=development INPUT=mcp-app.html vite build --watch"" ""tsx watch main.ts"""`.
 
 <details>
 <summary>Create <a href="https://github.com/modelcontextprotocol/ext-apps/blob/main/examples/quickstart/tsconfig.json"><code>tsconfig.json</code></a>:</summary>
@@ -447,8 +450,9 @@ MCP server listening on http://localhost:3001/mcp
 
 ```bash
 git clone https://github.com/modelcontextprotocol/ext-apps.git
-cd ext-apps/examples/basic-host
+cd ext-apps
 npm install
+cd examples/basic-host
 npm start
 ```
 

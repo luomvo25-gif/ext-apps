@@ -294,6 +294,17 @@ The resource content is returned via `resources/read`:
 }
 ```
 
+#### Metadata Location
+
+`UIResourceMeta` (CSP, permissions, domain, prefersBorder) may be provided on either or both:
+
+- **`resources/list`:** On the resource entry's `_meta.ui` field. Useful as a static default that hosts can review at connection time.
+- **`resources/read`:** On each content item's `_meta.ui` field. Useful for per-response overrides or dynamic metadata that is only known at read time.
+
+When `_meta.ui` is present on **both**, the content-item value takes precedence. Hosts MUST check both locations, preferring the content item and falling back to the listing entry.
+
+> **Server guidance:** Prefer placing `_meta.ui` on the content item in `resources/read`, especially when metadata is dynamic or varies per-response. Use the listing-level `_meta.ui` (via `registerAppResource` config) when metadata is static and you want hosts to be able to review security configuration at connection time without fetching the resource.
+
 #### Content Requirements:
 
 - URI MUST start with `ui://` scheme
@@ -321,15 +332,24 @@ The resource content is returned via `resources/read`:
 Example:
 
 ```json
-// Resource declaration
+// Resource declaration (resources/list) — static defaults for host review
 {
   "uri": "ui://weather-server/dashboard-template",
   "name": "weather_dashboard",
   "description": "Interactive weather dashboard view",
-  "mimeType": "text/html;profile=mcp-app"
+  "mimeType": "text/html;profile=mcp-app",
+  "_meta": {
+    "ui": {
+      "csp": {
+        "connectDomains": ["https://api.openweathermap.org"],
+        "resourceDomains": ["https://cdn.jsdelivr.net"]
+      },
+      "prefersBorder": true
+    }
+  }
 }
 
-// Resource content with metadata
+// Resource content (resources/read) — takes precedence when present
 {
   "contents": [{
     "uri": "ui://weather-server/dashboard-template",
@@ -505,8 +525,8 @@ If the Host is a web page, it MUST wrap the View and communicate with it through
 
 1. The Host and the Sandbox MUST have different origins.
 2. The Sandbox MUST have the following permissions: `allow-scripts`, `allow-same-origin`.
-3. The Sandbox MUST send a `ui/notifications/sandbox-proxy-ready` notification to the host when it's ready to process an `ui/notifications/sandbox-resource-ready` notification.
-4. Once the Sandbox is ready, the Host MUST send the raw HTML resource to load in a `ui/notifications/sandbox-resource-ready` notification.
+3. The Sandbox SHOULD send a `ui/notifications/sandbox-proxy-ready` notification to the host when it's ready to process an `ui/notifications/sandbox-resource-ready` notification.
+4. Once the Sandbox is ready, the Host SHOULD send the raw HTML resource to load in a `ui/notifications/sandbox-resource-ready` notification.
 5. The Sandbox MUST load the raw HTML of the View with CSP settings that:
    - Enforce the domains declared in `ui.csp` metadata
    - If `frameDomains` is provided, allow nested iframes from declared origins; otherwise use `frame-src 'none'`
@@ -1773,8 +1793,10 @@ Hosts MUST enforce Content Security Policies based on resource metadata.
 **CSP Construction from Metadata:**
 
 ```typescript
-const csp = resource._meta?.ui?.csp; // `resource` is extracted from the `contents` of the `resources/read` result
-const permissions = resource._meta?.ui?.permissions;
+// Prefer content-level _meta.ui (resources/read), fall back to listing-level (resources/list)
+const uiMeta = resource._meta?.ui ?? listingResource._meta?.ui;
+const csp = uiMeta?.csp;
+const permissions = uiMeta?.permissions;
 
 const cspValue = `
   default-src 'none';

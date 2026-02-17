@@ -34,6 +34,7 @@
 import {
   RESOURCE_URI_META_KEY,
   RESOURCE_MIME_TYPE,
+  McpUiResourceCsp,
   McpUiResourceMeta,
   McpUiToolMeta,
   McpUiClientCapabilities,
@@ -44,7 +45,7 @@ import type {
   RegisteredTool,
   ResourceMetadata,
   ToolCallback,
-  ReadResourceCallback,
+  ReadResourceCallback as _ReadResourceCallback,
   RegisteredResource,
 } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type {
@@ -53,12 +54,13 @@ import type {
 } from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import type {
   ClientCapabilities,
+  ReadResourceResult,
   ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
 
 // Re-exports for convenience
 export { RESOURCE_URI_META_KEY, RESOURCE_MIME_TYPE };
-export type { ResourceMetadata, ToolCallback, ReadResourceCallback };
+export type { ResourceMetadata, ToolCallback };
 
 /**
  * Base tool configuration matching the standard MCP server tool options.
@@ -110,12 +112,19 @@ export interface McpUiAppToolConfig extends ToolConfig {
  * Extends the base MCP SDK `ResourceMetadata` with optional UI metadata
  * for configuring security policies and rendering preferences.
  *
+ * The `_meta.ui` field here is included in the `resources/list` response and serves as
+ * a static default for hosts to review at connection time. When the `resources/read`
+ * content item also includes `_meta.ui`, the content-item value takes precedence.
+ *
  * @see {@link registerAppResource `registerAppResource`} for usage
  */
 export interface McpUiAppResourceConfig extends ResourceMetadata {
   /**
    * Optional UI metadata for the resource.
-   * Used to configure security policies (CSP) and rendering preferences.
+   *
+   * This appears on the resource entry in `resources/list` and acts as a listing-level
+   * fallback. Individual content items returned by `resources/read` may include their
+   * own `_meta.ui` which takes precedence over this value.
    */
   _meta?: {
     /**
@@ -235,6 +244,18 @@ export function registerAppTool<
   return server.registerTool(name, { ...config, _meta: normalizedMeta }, cb);
 }
 
+export type McpUiReadResourceResult = ReadResourceResult & {
+  _meta?: {
+    ui?: McpUiResourceMeta;
+    [key: string]: unknown;
+  };
+};
+export type McpUiReadResourceCallback = (
+  uri: URL,
+  extra: Parameters<_ReadResourceCallback>[1],
+) => McpUiReadResourceResult | Promise<McpUiReadResourceResult>;
+export type ReadResourceCallback = McpUiReadResourceCallback;
+
 /**
  * Register an app resource with the MCP server.
  *
@@ -269,7 +290,7 @@ export function registerAppTool<
  * );
  * ```
  *
- * @example With CSP configuration for external domains
+ * @example With CSP configuration for network access
  * ```ts source="./index.examples.ts#registerAppResource_withCsp"
  * registerAppResource(
  *   server,
@@ -298,6 +319,54 @@ export function registerAppTool<
  * );
  * ```
  *
+ * @example With stable origin for external API CORS allowlists
+ * ```ts source="./index.examples.ts#registerAppResource_withDomain"
+ * // Computes a stable origin from an MCP server URL for hosting in Claude.
+ * function computeAppDomainForClaude(mcpServerUrl: string): string {
+ *   const hash = crypto
+ *     .createHash("sha256")
+ *     .update(mcpServerUrl)
+ *     .digest("hex")
+ *     .slice(0, 32);
+ *   return `${hash}.claudemcpcontent.com`;
+ * }
+ *
+ * const APP_DOMAIN = computeAppDomainForClaude("https://example.com/mcp");
+ *
+ * registerAppResource(
+ *   server,
+ *   "Company Dashboard",
+ *   "ui://dashboard/view.html",
+ *   {
+ *     description: "Internal dashboard with company data",
+ *   },
+ *   async () => ({
+ *     contents: [
+ *       {
+ *         uri: "ui://dashboard/view.html",
+ *         mimeType: RESOURCE_MIME_TYPE,
+ *         text: dashboardHtml,
+ *         _meta: {
+ *           ui: {
+ *             // CSP: tell browser the app is allowed to make requests
+ *             csp: {
+ *               connectDomains: ["https://api.example.com"],
+ *             },
+ *             // CORS: give app a stable origin for the API server to allowlist
+ *             //
+ *             // (Public APIs that use `Access-Control-Allow-Origin: *` or API
+ *             // key auth don't need this.)
+ *             domain: APP_DOMAIN,
+ *           },
+ *         },
+ *       },
+ *     ],
+ *   }),
+ * );
+ * ```
+ *
+ * @see {@link McpUiResourceMeta `McpUiResourceMeta`} for `_meta.ui` configuration options
+ * @see {@link McpUiResourceCsp `McpUiResourceCsp`} for CSP domain allowlist configuration
  * @see {@link registerAppTool `registerAppTool`} to register tools that reference this resource
  */
 export function registerAppResource(
@@ -305,7 +374,7 @@ export function registerAppResource(
   name: string,
   uri: string,
   config: McpUiAppResourceConfig,
-  readCallback: ReadResourceCallback,
+  readCallback: McpUiReadResourceCallback,
 ): RegisteredResource {
   return server.registerResource(
     name,
@@ -340,21 +409,31 @@ export const EXTENSION_ID = "io.modelcontextprotocol/ui";
  * @returns The MCP Apps capability settings, or `undefined` if not supported
  *
  * @example Check for MCP Apps support in server initialization
- * ```typescript
- * import { getUiCapability, RESOURCE_MIME_TYPE, registerAppTool } from "@modelcontextprotocol/ext-apps/server";
- *
- * server.oninitialized = ({ clientCapabilities }) => {
+ * ```ts source="./index.examples.ts#getUiCapability_checkSupport"
+ * server.server.oninitialized = () => {
+ *   const clientCapabilities = server.server.getClientCapabilities();
  *   const uiCap = getUiCapability(clientCapabilities);
+ *
  *   if (uiCap?.mimeTypes?.includes(RESOURCE_MIME_TYPE)) {
- *     registerAppTool(server, "weather", {
- *       description: "Get weather with interactive dashboard",
- *       _meta: { ui: { resourceUri: "ui://weather/dashboard" } },
- *     }, weatherHandler);
+ *     // App-enhanced tool
+ *     registerAppTool(
+ *       server,
+ *       "weather",
+ *       {
+ *         description: "Get weather information with interactive dashboard",
+ *         _meta: { ui: { resourceUri: "ui://weather/dashboard" } },
+ *       },
+ *       weatherHandler,
+ *     );
  *   } else {
- *     // Register text-only fallback
- *     server.registerTool("weather", {
- *       description: "Get weather as text",
- *     }, textWeatherHandler);
+ *     // Text-only fallback
+ *     server.registerTool(
+ *       "weather",
+ *       {
+ *         description: "Get weather information",
+ *       },
+ *       textWeatherHandler,
+ *     );
  *   }
  * };
  * ```

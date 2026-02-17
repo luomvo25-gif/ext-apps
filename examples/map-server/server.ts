@@ -128,7 +128,7 @@ export function createServer(): McpServer {
       );
       return {
         contents: [
-          // _meta must be on the content item, not the resource metadata
+          // CSP metadata on the content item takes precedence over listing-level _meta
           {
             uri: RESOURCE_URI,
             mimeType: RESOURCE_MIME_TYPE,

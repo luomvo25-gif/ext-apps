@@ -18,6 +18,8 @@ import {
   AppBridge,
   getToolUiResourceUri,
   buildSandboxAttribute,
+  isToolVisibilityModelOnly,
+  isToolVisibilityAppOnly,
   type McpUiHostCapabilities,
 } from "./app-bridge";
 
@@ -677,6 +679,19 @@ describe("App <-> AppBridge integration", () => {
       expect(result.content).toEqual(resultContent);
     });
 
+    it("callServerTool throws a helpful error when called with a string instead of params object", async () => {
+      await bridge.connect(bridgeTransport);
+      await app.connect(appTransport);
+
+      await expect(
+        // @ts-expect-error intentionally testing wrong usage
+        app.callServerTool("my_tool"),
+      ).rejects.toThrow(
+        'callServerTool() expects an object as its first argument, but received a string ("my_tool"). ' +
+          'Did you mean: callServerTool({ name: "my_tool", arguments: { ... } })?',
+      );
+    });
+
     it("onlistresources setter registers handler for resources/list requests", async () => {
       const requestParams = {};
       const resources = [{ uri: "test://resource", name: "Test" }];
@@ -1005,6 +1020,156 @@ describe("buildSandboxAttribute", () => {
         downloads: undefined,
       });
       expect(result).toBe(BASELINE);
+    });
+  });
+});
+
+describe("isToolVisibilityModelOnly", () => {
+  describe("returns true", () => {
+    it("when visibility is exactly ['model']", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: { ui: { visibility: ["model"] } },
+      };
+      expect(isToolVisibilityModelOnly(tool)).toBe(true);
+    });
+  });
+
+  describe("returns false", () => {
+    it("when visibility is ['app']", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: { ui: { visibility: ["app"] } },
+      };
+      expect(isToolVisibilityModelOnly(tool)).toBe(false);
+    });
+
+    it("when visibility is ['model', 'app']", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: { ui: { visibility: ["model", "app"] } },
+      };
+      expect(isToolVisibilityModelOnly(tool)).toBe(false);
+    });
+
+    it("when visibility is ['app', 'model']", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: { ui: { visibility: ["app", "model"] } },
+      };
+      expect(isToolVisibilityModelOnly(tool)).toBe(false);
+    });
+
+    it("when visibility is empty array", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: { ui: { visibility: [] } },
+      };
+      expect(isToolVisibilityModelOnly(tool)).toBe(false);
+    });
+
+    it("when visibility is undefined", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: { ui: {} },
+      };
+      expect(isToolVisibilityModelOnly(tool)).toBe(false);
+    });
+
+    it("when _meta.ui is missing", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: {},
+      };
+      expect(isToolVisibilityModelOnly(tool)).toBe(false);
+    });
+
+    it("when _meta is missing", () => {
+      const tool = { name: "test-tool" };
+      expect(isToolVisibilityModelOnly(tool)).toBe(false);
+    });
+
+    it("when tool has resourceUri but no visibility", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: { ui: { resourceUri: "ui://server/app.html" } },
+      };
+      expect(isToolVisibilityModelOnly(tool)).toBe(false);
+    });
+  });
+});
+
+describe("isToolVisibilityAppOnly", () => {
+  describe("returns true", () => {
+    it("when visibility is exactly ['app']", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: { ui: { visibility: ["app"] } },
+      };
+      expect(isToolVisibilityAppOnly(tool)).toBe(true);
+    });
+  });
+
+  describe("returns false", () => {
+    it("when visibility is ['model']", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: { ui: { visibility: ["model"] } },
+      };
+      expect(isToolVisibilityAppOnly(tool)).toBe(false);
+    });
+
+    it("when visibility is ['model', 'app']", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: { ui: { visibility: ["model", "app"] } },
+      };
+      expect(isToolVisibilityAppOnly(tool)).toBe(false);
+    });
+
+    it("when visibility is ['app', 'model']", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: { ui: { visibility: ["app", "model"] } },
+      };
+      expect(isToolVisibilityAppOnly(tool)).toBe(false);
+    });
+
+    it("when visibility is empty array", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: { ui: { visibility: [] } },
+      };
+      expect(isToolVisibilityAppOnly(tool)).toBe(false);
+    });
+
+    it("when visibility is undefined", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: { ui: {} },
+      };
+      expect(isToolVisibilityAppOnly(tool)).toBe(false);
+    });
+
+    it("when _meta.ui is missing", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: {},
+      };
+      expect(isToolVisibilityAppOnly(tool)).toBe(false);
+    });
+
+    it("when _meta is missing", () => {
+      const tool = { name: "test-tool" };
+      expect(isToolVisibilityAppOnly(tool)).toBe(false);
+    });
+
+    it("when tool has resourceUri but no visibility", () => {
+      const tool = {
+        name: "test-tool",
+        _meta: { ui: { resourceUri: "ui://server/app.html" } },
+      };
+      expect(isToolVisibilityAppOnly(tool)).toBe(false);
     });
   });
 });

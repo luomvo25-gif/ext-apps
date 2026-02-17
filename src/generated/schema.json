@@ -134,25 +134,25 @@
               "type": "object",
               "properties": {
                 "camera": {
-                  "description": "Request camera access (Permission Policy `camera` feature).",
+                  "description": "Request camera access.\n\nMaps to Permission Policy `camera` feature.",
                   "type": "object",
                   "properties": {},
                   "additionalProperties": false
                 },
                 "microphone": {
-                  "description": "Request microphone access (Permission Policy `microphone` feature).",
+                  "description": "Request microphone access.\n\nMaps to Permission Policy `microphone` feature.",
                   "type": "object",
                   "properties": {},
                   "additionalProperties": false
                 },
                 "geolocation": {
-                  "description": "Request geolocation access (Permission Policy `geolocation` feature).",
+                  "description": "Request geolocation access.\n\nMaps to Permission Policy `geolocation` feature.",
                   "type": "object",
                   "properties": {},
                   "additionalProperties": false
                 },
                 "clipboardWrite": {
-                  "description": "Request clipboard write access (Permission Policy `clipboard-write` feature).",
+                  "description": "Request clipboard write access.\n\nMaps to Permission Policy `clipboard-write` feature.",
                   "type": "object",
                   "properties": {},
                   "additionalProperties": false
@@ -165,28 +165,28 @@
               "type": "object",
               "properties": {
                 "connectDomains": {
-                  "description": "Origins for network requests (fetch/XHR/WebSocket).",
+                  "description": "Origins for network requests (fetch/XHR/WebSocket).\n\n- Maps to CSP `connect-src` directive\n- Empty or omitted → no network connections (secure default)",
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
                 },
                 "resourceDomains": {
-                  "description": "Origins for static resources (scripts, images, styles, fonts).",
+                  "description": "Origins for static resources (images, scripts, stylesheets, fonts, media).\n\n- Maps to CSP `img-src`, `script-src`, `style-src`, `font-src`, `media-src` directives\n- Wildcard subdomains supported: `https://*.example.com`\n- Empty or omitted → no network resources (secure default)",
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
                 },
                 "frameDomains": {
-                  "description": "Origins for nested iframes (frame-src directive).",
+                  "description": "Origins for nested iframes.\n\n- Maps to CSP `frame-src` directive\n- Empty or omitted → no nested iframes allowed (`frame-src 'none'`)",
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
                 },
                 "baseUriDomains": {
-                  "description": "Allowed base URIs for the document (base-uri directive).",
+                  "description": "Allowed base URIs for the document.\n\n- Maps to CSP `base-uri` directive\n- Empty or omitted → only same origin allowed (`base-uri 'self'`)",
                   "type": "array",
                   "items": {
                     "type": "string"
@@ -2511,25 +2511,25 @@
                   "type": "object",
                   "properties": {
                     "camera": {
-                      "description": "Request camera access (Permission Policy `camera` feature).",
+                      "description": "Request camera access.\n\nMaps to Permission Policy `camera` feature.",
                       "type": "object",
                       "properties": {},
                       "additionalProperties": false
                     },
                     "microphone": {
-                      "description": "Request microphone access (Permission Policy `microphone` feature).",
+                      "description": "Request microphone access.\n\nMaps to Permission Policy `microphone` feature.",
                       "type": "object",
                       "properties": {},
                       "additionalProperties": false
                     },
                     "geolocation": {
-                      "description": "Request geolocation access (Permission Policy `geolocation` feature).",
+                      "description": "Request geolocation access.\n\nMaps to Permission Policy `geolocation` feature.",
                       "type": "object",
                       "properties": {},
                       "additionalProperties": false
                     },
                     "clipboardWrite": {
-                      "description": "Request clipboard write access (Permission Policy `clipboard-write` feature).",
+                      "description": "Request clipboard write access.\n\nMaps to Permission Policy `clipboard-write` feature.",
                       "type": "object",
                       "properties": {},
                       "additionalProperties": false
@@ -2542,28 +2542,28 @@
                   "type": "object",
                   "properties": {
                     "connectDomains": {
-                      "description": "Origins for network requests (fetch/XHR/WebSocket).",
+                      "description": "Origins for network requests (fetch/XHR/WebSocket).\n\n- Maps to CSP `connect-src` directive\n- Empty or omitted → no network connections (secure default)",
                       "type": "array",
                       "items": {
                         "type": "string"
                       }
                     },
                     "resourceDomains": {
-                      "description": "Origins for static resources (scripts, images, styles, fonts).",
+                      "description": "Origins for static resources (images, scripts, stylesheets, fonts, media).\n\n- Maps to CSP `img-src`, `script-src`, `style-src`, `font-src`, `media-src` directives\n- Wildcard subdomains supported: `https://*.example.com`\n- Empty or omitted → no network resources (secure default)",
                       "type": "array",
                       "items": {
                         "type": "string"
                       }
                     },
                     "frameDomains": {
-                      "description": "Origins for nested iframes (frame-src directive).",
+                      "description": "Origins for nested iframes.\n\n- Maps to CSP `frame-src` directive\n- Empty or omitted → no nested iframes allowed (`frame-src 'none'`)",
                       "type": "array",
                       "items": {
                         "type": "string"
                       }
                     },
                     "baseUriDomains": {
-                      "description": "Allowed base URIs for the document (base-uri directive).",
+                      "description": "Allowed base URIs for the document.\n\n- Maps to CSP `base-uri` directive\n- Empty or omitted → only same origin allowed (`base-uri 'self'`)",
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -3936,28 +3936,28 @@
       "type": "object",
       "properties": {
         "connectDomains": {
-          "description": "Origins for network requests (fetch/XHR/WebSocket).",
+          "description": "Origins for network requests (fetch/XHR/WebSocket).\n\n- Maps to CSP `connect-src` directive\n- Empty or omitted → no network connections (secure default)",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "resourceDomains": {
-          "description": "Origins for static resources (scripts, images, styles, fonts).",
+          "description": "Origins for static resources (images, scripts, stylesheets, fonts, media).\n\n- Maps to CSP `img-src`, `script-src`, `style-src`, `font-src`, `media-src` directives\n- Wildcard subdomains supported: `https://*.example.com`\n- Empty or omitted → no network resources (secure default)",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "frameDomains": {
-          "description": "Origins for nested iframes (frame-src directive).",
+          "description": "Origins for nested iframes.\n\n- Maps to CSP `frame-src` directive\n- Empty or omitted → no nested iframes allowed (`frame-src 'none'`)",
           "type": "array",
           "items": {
             "type": "string"
           }
         },
         "baseUriDomains": {
-          "description": "Allowed base URIs for the document (base-uri directive).",
+          "description": "Allowed base URIs for the document.\n\n- Maps to CSP `base-uri` directive\n- Empty or omitted → only same origin allowed (`base-uri 'self'`)",
           "type": "array",
           "items": {
             "type": "string"
@@ -3971,32 +3971,32 @@
       "type": "object",
       "properties": {
         "csp": {
-          "description": "Content Security Policy configuration.",
+          "description": "Content Security Policy configuration for UI resources.",
           "type": "object",
           "properties": {
             "connectDomains": {
-              "description": "Origins for network requests (fetch/XHR/WebSocket).",
+              "description": "Origins for network requests (fetch/XHR/WebSocket).\n\n- Maps to CSP `connect-src` directive\n- Empty or omitted → no network connections (secure default)",
               "type": "array",
               "items": {
                 "type": "string"
               }
             },
             "resourceDomains": {
-              "description": "Origins for static resources (scripts, images, styles, fonts).",
+              "description": "Origins for static resources (images, scripts, stylesheets, fonts, media).\n\n- Maps to CSP `img-src`, `script-src`, `style-src`, `font-src`, `media-src` directives\n- Wildcard subdomains supported: `https://*.example.com`\n- Empty or omitted → no network resources (secure default)",
               "type": "array",
               "items": {
                 "type": "string"
               }
             },
             "frameDomains": {
-              "description": "Origins for nested iframes (frame-src directive).",
+              "description": "Origins for nested iframes.\n\n- Maps to CSP `frame-src` directive\n- Empty or omitted → no nested iframes allowed (`frame-src 'none'`)",
               "type": "array",
               "items": {
                 "type": "string"
               }
             },
             "baseUriDomains": {
-              "description": "Allowed base URIs for the document (base-uri directive).",
+              "description": "Allowed base URIs for the document.\n\n- Maps to CSP `base-uri` directive\n- Empty or omitted → only same origin allowed (`base-uri 'self'`)",
               "type": "array",
               "items": {
                 "type": "string"
@@ -4006,29 +4006,29 @@
           "additionalProperties": false
         },
         "permissions": {
-          "description": "Sandbox permissions requested by the UI.",
+          "description": "Sandbox permissions requested by the UI resource.",
           "type": "object",
           "properties": {
             "camera": {
-              "description": "Request camera access (Permission Policy `camera` feature).",
+              "description": "Request camera access.\n\nMaps to Permission Policy `camera` feature.",
               "type": "object",
               "properties": {},
               "additionalProperties": false
             },
             "microphone": {
-              "description": "Request microphone access (Permission Policy `microphone` feature).",
+              "description": "Request microphone access.\n\nMaps to Permission Policy `microphone` feature.",
               "type": "object",
               "properties": {},
               "additionalProperties": false
             },
             "geolocation": {
-              "description": "Request geolocation access (Permission Policy `geolocation` feature).",
+              "description": "Request geolocation access.\n\nMaps to Permission Policy `geolocation` feature.",
               "type": "object",
               "properties": {},
               "additionalProperties": false
             },
             "clipboardWrite": {
-              "description": "Request clipboard write access (Permission Policy `clipboard-write` feature).",
+              "description": "Request clipboard write access.\n\nMaps to Permission Policy `clipboard-write` feature.",
               "type": "object",
               "properties": {},
               "additionalProperties": false
@@ -4068,11 +4068,11 @@
           "additionalProperties": false
         },
         "domain": {
-          "description": "Dedicated origin for view sandbox.",
+          "description": "Dedicated origin for view sandbox.\n\nUseful when views need stable, dedicated origins for OAuth callbacks, CORS policies, or API key allowlists.\n\n**Host-dependent:** The format and validation rules for this field are determined by each host. Servers MUST consult host-specific documentation for the expected domain format. Common patterns include:\n- Hash-based subdomains (e.g., `{hash}.claudemcpcontent.com`)\n- URL-derived subdomains (e.g., `www-example-com.oaiusercontent.com`)\n\nIf omitted, host uses default sandbox origin (typically per-conversation).",
           "type": "string"
         },
         "prefersBorder": {
-          "description": "Visual boundary preference - true if UI prefers a visible border.",
+          "description": "Visual boundary preference - true if view prefers a visible border.\n\nBoolean requesting whether a visible border and background is provided by the host. Specifying an explicit value for this is recommended because hosts' defaults may vary.\n\n- `true`: request visible border + background\n- `false`: request no visible border + background\n- omitted: host decides border",
           "type": "boolean"
         }
       },
@@ -4083,25 +4083,25 @@
       "type": "object",
       "properties": {
         "camera": {
-          "description": "Request camera access (Permission Policy `camera` feature).",
+          "description": "Request camera access.\n\nMaps to Permission Policy `camera` feature.",
           "type": "object",
           "properties": {},
           "additionalProperties": false
         },
         "microphone": {
-          "description": "Request microphone access (Permission Policy `microphone` feature).",
+          "description": "Request microphone access.\n\nMaps to Permission Policy `microphone` feature.",
           "type": "object",
           "properties": {},
           "additionalProperties": false
         },
         "geolocation": {
-          "description": "Request geolocation access (Permission Policy `geolocation` feature).",
+          "description": "Request geolocation access.\n\nMaps to Permission Policy `geolocation` feature.",
           "type": "object",
           "properties": {},
           "additionalProperties": false
         },
         "clipboardWrite": {
-          "description": "Request clipboard write access (Permission Policy `clipboard-write` feature).",
+          "description": "Request clipboard write access.\n\nMaps to Permission Policy `clipboard-write` feature.",
           "type": "object",
           "properties": {},
           "additionalProperties": false
@@ -4240,28 +4240,28 @@
               "type": "object",
               "properties": {
                 "connectDomains": {
-                  "description": "Origins for network requests (fetch/XHR/WebSocket).",
+                  "description": "Origins for network requests (fetch/XHR/WebSocket).\n\n- Maps to CSP `connect-src` directive\n- Empty or omitted → no network connections (secure default)",
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
                 },
                 "resourceDomains": {
-                  "description": "Origins for static resources (scripts, images, styles, fonts).",
+                  "description": "Origins for static resources (images, scripts, stylesheets, fonts, media).\n\n- Maps to CSP `img-src`, `script-src`, `style-src`, `font-src`, `media-src` directives\n- Wildcard subdomains supported: `https://*.example.com`\n- Empty or omitted → no network resources (secure default)",
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
                 },
                 "frameDomains": {
-                  "description": "Origins for nested iframes (frame-src directive).",
+                  "description": "Origins for nested iframes.\n\n- Maps to CSP `frame-src` directive\n- Empty or omitted → no nested iframes allowed (`frame-src 'none'`)",
                   "type": "array",
                   "items": {
                     "type": "string"
                   }
                 },
                 "baseUriDomains": {
-                  "description": "Allowed base URIs for the document (base-uri directive).",
+                  "description": "Allowed base URIs for the document.\n\n- Maps to CSP `base-uri` directive\n- Empty or omitted → only same origin allowed (`base-uri 'self'`)",
                   "type": "array",
                   "items": {
                     "type": "string"
@@ -4275,25 +4275,25 @@
               "type": "object",
               "properties": {
                 "camera": {
-                  "description": "Request camera access (Permission Policy `camera` feature).",
+                  "description": "Request camera access.\n\nMaps to Permission Policy `camera` feature.",
                   "type": "object",
                   "properties": {},
                   "additionalProperties": false
                 },
                 "microphone": {
-                  "description": "Request microphone access (Permission Policy `microphone` feature).",
+                  "description": "Request microphone access.\n\nMaps to Permission Policy `microphone` feature.",
                   "type": "object",
                   "properties": {},
                   "additionalProperties": false
                 },
                 "geolocation": {
-                  "description": "Request geolocation access (Permission Policy `geolocation` feature).",
+                  "description": "Request geolocation access.\n\nMaps to Permission Policy `geolocation` feature.",
                   "type": "object",
                   "properties": {},
                   "additionalProperties": false
                 },
                 "clipboardWrite": {
-                  "description": "Request clipboard write access (Permission Policy `clipboard-write` feature).",
+                  "description": "Request clipboard write access.\n\nMaps to Permission Policy `clipboard-write` feature.",
                   "type": "object",
                   "properties": {},
                   "additionalProperties": false

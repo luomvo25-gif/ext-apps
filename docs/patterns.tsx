@@ -14,12 +14,19 @@ import {
   applyHostStyleVariables,
 } from "../src/styles.js";
 import { randomUUID } from "node:crypto";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type {
+  CallToolResult,
+  ReadResourceResult,
+} from "@modelcontextprotocol/sdk/types.js";
+import { ReadResourceResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpUiHostContext } from "../src/types.js";
 import { useEffect, useState } from "react";
 import { useApp } from "../src/react/index.js";
 import { registerAppTool } from "../src/server/index.js";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  McpServer,
+  ResourceTemplate,
+} from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 /**
@@ -211,6 +218,53 @@ function chunkedDataClient(app: App, resourceId: string) {
     console.log(`Loaded ${data.length} bytes`);
   });
   //#endregion chunkedDataClient
+}
+
+/**
+ * Example: Serving binary blobs via resources (server-side)
+ */
+function binaryBlobResourceServer(
+  server: McpServer,
+  getVideoData: (id: string) => Promise<ArrayBuffer>,
+) {
+  //#region binaryBlobResourceServer
+  server.registerResource(
+    "Video",
+    new ResourceTemplate("video://{id}", { list: undefined }),
+    {
+      description: "Video data served as base64 blob",
+      mimeType: "video/mp4",
+    },
+    async (uri, { id }): Promise<ReadResourceResult> => {
+      // Fetch or load your binary data
+      const idString = Array.isArray(id) ? id[0] : id;
+      const buffer = await getVideoData(idString);
+      const blob = Buffer.from(buffer).toString("base64");
+
+      return { contents: [{ uri: uri.href, mimeType: "video/mp4", blob }] };
+    },
+  );
+  //#endregion binaryBlobResourceServer
+}
+
+/**
+ * Example: Serving binary blobs via resources (client-side)
+ */
+async function binaryBlobResourceClient(app: App, videoId: string) {
+  //#region binaryBlobResourceClient
+  const result = await app.request(
+    { method: "resources/read", params: { uri: `video://${videoId}` } },
+    ReadResourceResultSchema,
+  );
+
+  const content = result.contents[0];
+  if (!content || !("blob" in content)) {
+    throw new Error("Resource did not contain blob data");
+  }
+
+  const videoEl = document.querySelector("video")!;
+  videoEl.src = `data:${content.mimeType!};base64,${content.blob}`;
+  //#endregion binaryBlobResourceClient
 }
 
 /**
@@ -406,6 +460,8 @@ void pollingVanillaJs;
 void pollingReact;
 void chunkedDataServer;
 void chunkedDataClient;
+void binaryBlobResourceServer;
+void binaryBlobResourceClient;
 void hostContextVanillaJs;
 void hostContextReact;
 void persistViewStateServer;

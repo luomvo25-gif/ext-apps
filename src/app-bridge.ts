@@ -79,6 +79,7 @@ import {
   McpUiRequestDisplayModeResult,
   McpUiResourcePermissions,
   McpUiResourceSandbox,
+  McpUiToolMeta,
 } from "./types";
 export * from "./types";
 export { RESOURCE_URI_META_KEY, RESOURCE_MIME_TYPE } from "./app";
@@ -111,7 +112,7 @@ export { PostMessageTransport } from "./message-transport";
  */
 export function getToolUiResourceUri(tool: Partial<Tool>): string | undefined {
   // Try new nested format first: _meta.ui.resourceUri
-  const uiMeta = tool._meta?.ui as { resourceUri?: unknown } | undefined;
+  const uiMeta = tool._meta?.ui as McpUiToolMeta | undefined;
   let uri: unknown = uiMeta?.resourceUri;
 
   // Fall back to deprecated flat format: _meta["ui/resourceUri"]
@@ -125,6 +126,34 @@ export function getToolUiResourceUri(tool: Partial<Tool>): string | undefined {
     throw new Error(`Invalid UI resource URI: ${JSON.stringify(uri)}`);
   }
   return undefined;
+}
+
+/**
+ * Check if a tool is visible to the model only.
+ *
+ * @param tool - Tool object with visibility metadata
+ * @returns True if the tool is visible to the model only, false otherwise
+ */
+export function isToolVisibilityModelOnly(tool: Partial<Tool>): boolean {
+  const uiMeta = tool._meta?.ui as McpUiToolMeta | undefined;
+  const visibility = uiMeta?.visibility as Array<"model" | "app"> | undefined;
+  if (!visibility) return false;
+  if (visibility.length === 1 && visibility[0] === "model") return true;
+  return false;
+}
+
+/**
+ * Check if a tool is visible to the app only.
+ *
+ * @param tool - Tool object with visibility metadata
+ * @returns True if the tool is visible to the app only, false otherwise
+ */
+export function isToolVisibilityAppOnly(tool: Partial<Tool>): boolean {
+  const uiMeta = tool._meta?.ui as McpUiToolMeta | undefined;
+  const visibility = uiMeta?.visibility as Array<"model" | "app"> | undefined;
+  if (!visibility) return false;
+  if (visibility.length === 1 && visibility[0] === "app") return true;
+  return false;
 }
 
 /**
