@@ -797,7 +797,7 @@ describe("IncrementalJsonParser", () => {
       const completions: string[] = [];
       parser.onComplete = (j) => completions.push(j);
       parser.write("{}garbage");
-      expect(completions).toEqual(["{}",]);
+      expect(completions).toEqual(["{}"]);
     });
   });
 
@@ -1078,7 +1078,12 @@ describe("IncrementalJsonParser", () => {
       // After third: first point complete
       expect(partials[2]).toEqual({ data: [{ x: 1, y: 10 }] });
       // After fourth: second point partial
-      expect(partials[3]).toEqual({ data: [{ x: 1, y: 10 }, { x: 2, y: 20 }] });
+      expect(partials[3]).toEqual({
+        data: [
+          { x: 1, y: 10 },
+          { x: 2, y: 20 },
+        ],
+      });
       // After fifth: second point complete
       expect(partials[4]).toEqual({
         data: [
@@ -1119,7 +1124,8 @@ describe("IncrementalJsonParser", () => {
 
     it("every partial is valid JSON", () => {
       // Simulate realistic LLM streaming: character-by-character tool args
-      const fullArgs = '{"query": "climate change", "maxResults": 10, "filters": {"year": 2024, "language": "en"}}';
+      const fullArgs =
+        '{"query": "climate change", "maxResults": 10, "filters": {"year": 2024, "language": "en"}}';
       const parser = new IncrementalJsonParser();
       let invalidCount = 0;
 
