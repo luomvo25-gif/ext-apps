@@ -228,9 +228,15 @@ export class IncrementalJsonParser {
     if (this.complete || chunk.length === 0) return;
 
     const startOffset = this.rawLength;
+    let consumed = chunk.length;
 
     for (let i = 0; i < chunk.length; i++) {
-      if (this.complete) break;
+      if (this.complete) {
+        // The previous iteration completed the value — stop before this
+        // character so that trailing content is excluded from raw.
+        consumed = i;
+        break;
+      }
       const ch = chunk[i]!;
       const absPos = startOffset + i;
 
@@ -264,8 +270,14 @@ export class IncrementalJsonParser {
       }
     }
 
-    this.raw += chunk;
-    this.rawLength += chunk.length;
+    // Only append the consumed portion — if the value completed mid-chunk,
+    // trailing characters are discarded so the raw buffer stays clean.
+    if (consumed === chunk.length) {
+      this.raw += chunk;
+    } else if (consumed > 0) {
+      this.raw += chunk.substring(0, consumed);
+    }
+    this.rawLength += consumed;
 
     // Invalidate cache & fire callbacks
     const prevHealed = this.healedCache;

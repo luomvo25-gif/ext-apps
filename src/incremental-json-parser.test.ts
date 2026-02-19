@@ -618,4 +618,527 @@ describe("IncrementalJsonParser", () => {
       expect(parser.getHealed()).toBe('{\n\t"a":\n\t1}');
     });
   });
+
+  // -----------------------------------------------------------------------
+  // Edge cases — empty values and containers
+  // -----------------------------------------------------------------------
+
+  describe("edge cases — empty values and containers", () => {
+    it("handles empty string value", () => {
+      parser.write('{"a": ""}');
+      expect(parser.getHealed()).toBe('{"a": ""}');
+      expect(parser.isComplete).toBe(true);
+    });
+
+    it("handles empty string key", () => {
+      parser.write('{"": 1}');
+      expect(parser.getHealed()).toBe('{"": 1}');
+      expect(parser.isComplete).toBe(true);
+    });
+
+    it("heals mid-empty-string value", () => {
+      parser.write('{"a": "');
+      expect(parser.getHealed()).toBe('{"a": ""}');
+    });
+
+    it("heals nested empty containers", () => {
+      parser.write("[{}, [], [");
+      expect(parser.getHealed()).toBe("[{}, [], []]");
+      expect(() => JSON.parse(parser.getHealed())).not.toThrow();
+    });
+
+    it("handles object with only empty containers", () => {
+      parser.write('{"a": {}, "b": []}');
+      expect(parser.getHealed()).toBe('{"a": {}, "b": []}');
+      expect(parser.isComplete).toBe(true);
+    });
+
+    it("handles empty array as top-level value", () => {
+      parser.write("[]");
+      expect(parser.isComplete).toBe(true);
+    });
+
+    it("handles empty object as top-level value", () => {
+      parser.write("{}");
+      expect(parser.isComplete).toBe(true);
+    });
+
+    it("handles array of empty arrays", () => {
+      parser.write("[[], [], ");
+      expect(parser.getHealed()).toBe("[[], []]");
+    });
+
+    it("handles key with escaped quote", () => {
+      parser.write('{"say \\"hi');
+      const healed = parser.getHealed();
+      expect(healed).toBe('{"say \\"hi": null}');
+      expect(() => JSON.parse(healed)).not.toThrow();
+    });
+
+    it("handles value string with multiple escapes", () => {
+      parser.write('{"a": "\\t\\n\\\\\\"');
+      const healed = parser.getHealed();
+      expect(healed).toBe('{"a": "\\t\\n\\\\\\""}');
+      expect(() => JSON.parse(healed)).not.toThrow();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // end() method
+  // -----------------------------------------------------------------------
+
+  describe("end()", () => {
+    it("completes a top-level number", () => {
+      parser.write("42");
+      expect(parser.isComplete).toBe(false);
+      parser.end();
+      expect(parser.isComplete).toBe(true);
+      expect(parser.getHealed()).toBe("42");
+    });
+
+    it("completes a top-level negative number", () => {
+      parser.write("-7");
+      parser.end();
+      expect(parser.isComplete).toBe(true);
+    });
+
+    it("completes a top-level float", () => {
+      parser.write("3.14");
+      parser.end();
+      expect(parser.isComplete).toBe(true);
+    });
+
+    it("is a no-op when already complete", () => {
+      parser.write("{}");
+      expect(parser.isComplete).toBe(true);
+      parser.end();
+      expect(parser.isComplete).toBe(true);
+      expect(parser.getHealed()).toBe("{}");
+    });
+
+    it("is idempotent (double call)", () => {
+      parser.write("42");
+      parser.end();
+      parser.end();
+      expect(parser.isComplete).toBe(true);
+      expect(parser.getHealed()).toBe("42");
+    });
+
+    it("does not complete when containers are still open", () => {
+      parser.write('{"a": 1');
+      parser.end();
+      expect(parser.isComplete).toBe(false);
+      // Healing still works
+      expect(parser.getHealed()).toBe('{"a": 1}');
+    });
+
+    it("does not complete a partial literal", () => {
+      parser.write("tru");
+      parser.end();
+      // literalIndex (3) !== literalTarget.length (4), so end() is a no-op
+      expect(parser.isComplete).toBe(false);
+      expect(parser.getHealed()).toBe("true");
+    });
+
+    it("does not complete an in-progress string", () => {
+      parser.write('"hello');
+      parser.end();
+      expect(parser.isComplete).toBe(false);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Trailing content after completion (regression)
+  // -----------------------------------------------------------------------
+
+  describe("trailing content after completion", () => {
+    it("excludes trailing content from raw when completing mid-chunk", () => {
+      parser.write("{}extra");
+      expect(parser.isComplete).toBe(true);
+      expect(parser.getRaw()).toBe("{}");
+      expect(parser.getHealed()).toBe("{}");
+    });
+
+    it("excludes trailing content for arrays", () => {
+      parser.write("[1]trailing");
+      expect(parser.isComplete).toBe(true);
+      expect(parser.getRaw()).toBe("[1]");
+    });
+
+    it("excludes trailing content for strings", () => {
+      parser.write('"hello"world');
+      expect(parser.isComplete).toBe(true);
+      expect(parser.getRaw()).toBe('"hello"');
+    });
+
+    it("excludes trailing content for top-level literal", () => {
+      parser.write("nullextra");
+      expect(parser.isComplete).toBe(true);
+      expect(parser.getRaw()).toBe("null");
+    });
+
+    it("healed output is valid JSON when trailing content would break it", () => {
+      parser.write('{"a": 1}{"b": 2}');
+      expect(parser.isComplete).toBe(true);
+      const healed = parser.getHealed();
+      expect(healed).toBe('{"a": 1}');
+      expect(JSON.parse(healed)).toEqual({ a: 1 });
+    });
+
+    it("handles top-level number completed by whitespace in same chunk", () => {
+      parser.write("42 ");
+      // The space terminates the number; only "42" should be in raw.
+      expect(parser.isComplete).toBe(true);
+      expect(parser.getRaw()).toBe("42");
+      expect(parser.getHealed()).toBe("42");
+    });
+
+    it("onComplete receives clean raw without trailing content", () => {
+      const completions: string[] = [];
+      parser.onComplete = (j) => completions.push(j);
+      parser.write("{}garbage");
+      expect(completions).toEqual(["{}",]);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Malformed / adversarial input
+  // -----------------------------------------------------------------------
+
+  describe("malformed input", () => {
+    it("silently skips unrecognised characters in value position", () => {
+      // Garbage chars in value position are skipped; the healing still adds
+      // a placeholder.  Note: the raw buffer retains them, so the healed
+      // output will NOT parse — this is expected for invalid input.
+      parser.write('{"a": !}');
+      const healed = parser.getHealed();
+      // The `!` is skipped, `}` doesn't close because phase is OBJ_VALUE,
+      // so the object never closes in the FSA.
+      expect(parser.isComplete).toBe(false);
+    });
+
+    it("handles lone closing brace", () => {
+      parser.write("}");
+      // `}` with no open object — silently skipped
+      expect(parser.isComplete).toBe(false);
+      expect(parser.getHealed()).toBe("}");
+    });
+
+    it("handles lone closing bracket", () => {
+      parser.write("]");
+      expect(parser.isComplete).toBe(false);
+    });
+
+    it("handles double comma in array (invalid JSON)", () => {
+      // Double comma: first `,` sets ARR_AFTER_COMMA, second `,` doesn't
+      // match any transition and is silently absorbed into raw.
+      parser.write("[1,,2]");
+      // The parser does complete (it sees valid structural flow around the
+      // extra comma since `2` starts a new value).
+      expect(parser.isComplete).toBe(true);
+      // But the raw contains `,,` which is invalid JSON.
+      expect(() => JSON.parse(parser.getHealed())).toThrow();
+    });
+
+    it("handles unescaped newline inside string", () => {
+      // JSON spec forbids literal control characters in strings, but the
+      // parser's FSA does not reject them.  The healed output will contain
+      // the raw newline and JSON.parse will reject it.
+      parser.write('{"a": "line1\nline2"}');
+      expect(parser.isComplete).toBe(true);
+      expect(() => JSON.parse(parser.getHealed())).toThrow();
+    });
+
+    it("BOM prefix is absorbed into raw", () => {
+      parser.write('\uFEFF{"a": 1}');
+      expect(parser.isComplete).toBe(true);
+      // The BOM is an unrecognised char — silently skipped by the FSA but
+      // retained in raw.  Whether JSON.parse accepts it is engine-dependent
+      // (V8 does, JavaScriptCore does not), so we just verify completion.
+      expect(parser.getRaw()).toBe('\uFEFF{"a": 1}');
+    });
+
+    it("handles numeric key attempt (invalid JSON)", () => {
+      // `{123` — `1` starts a number in OBJ_EMPTY context. The FSA doesn't
+      // enforce that keys must be strings, so it proceeds incorrectly.
+      parser.write("{123");
+      expect(parser.isComplete).toBe(false);
+      // Output will not be valid JSON
+      expect(() => JSON.parse(parser.getHealed())).toThrow();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Key-vs-value string context
+  // -----------------------------------------------------------------------
+
+  describe("key vs value string context", () => {
+    it("heals partial key in empty object as key", () => {
+      parser.write('{"ke');
+      expect(parser.getHealed()).toBe('{"ke": null}');
+      expect(JSON.parse(parser.getHealed())).toEqual({ ke: null });
+    });
+
+    it("heals partial key after comma as key", () => {
+      parser.write('{"a": 1, "ke');
+      expect(parser.getHealed()).toBe('{"a": 1, "ke": null}');
+      expect(JSON.parse(parser.getHealed())).toEqual({ a: 1, ke: null });
+    });
+
+    it("heals partial value string (not mistaken for key)", () => {
+      parser.write('{"a": "va');
+      expect(parser.getHealed()).toBe('{"a": "va"}');
+      expect(JSON.parse(parser.getHealed())).toEqual({ a: "va" });
+    });
+
+    it("heals key immediately after colon with no space", () => {
+      parser.write('{"a":"va');
+      expect(parser.getHealed()).toBe('{"a":"va"}');
+      expect(JSON.parse(parser.getHealed())).toEqual({ a: "va" });
+    });
+
+    it("heals string in array (always value context)", () => {
+      parser.write('["ke');
+      expect(parser.getHealed()).toBe('["ke"]');
+      expect(JSON.parse(parser.getHealed())).toEqual(["ke"]);
+    });
+
+    it("unicode escape in key heals with key suffix", () => {
+      parser.write('{"\\u00');
+      const healed = parser.getHealed();
+      expect(healed).toBe('{"\\u0000": null}');
+      expect(JSON.parse(healed)).toEqual({ "\u0000": null });
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Large input / deep nesting / performance
+  // -----------------------------------------------------------------------
+
+  describe("large input and deep nesting", () => {
+    it("handles deeply nested arrays (depth 100)", () => {
+      const opens = "[".repeat(100);
+      parser.write(opens);
+      expect(parser.depth).toBe(100);
+      const healed = parser.getHealed();
+      expect(healed).toBe(opens + "]".repeat(100));
+      expect(() => JSON.parse(healed)).not.toThrow();
+    });
+
+    it("handles deeply nested objects (depth 50)", () => {
+      // {"a":{"a":{"a":...
+      let input = "";
+      for (let i = 0; i < 50; i++) {
+        input += '{"a":';
+      }
+      input += "1";
+      parser.write(input);
+      expect(parser.depth).toBe(50);
+      const healed = parser.getHealed();
+      expect(() => JSON.parse(healed)).not.toThrow();
+      // Innermost value should be 1
+      let parsed = JSON.parse(healed);
+      for (let i = 0; i < 50; i++) {
+        parsed = parsed.a;
+      }
+      expect(parsed).toBe(1);
+    });
+
+    it("processes 10KB of streaming JSON correctly", () => {
+      // Build a large JSON object streamed in small chunks
+      const keys: string[] = [];
+      parser.write("{");
+      for (let i = 0; i < 500; i++) {
+        if (i > 0) parser.write(", ");
+        const key = `key_${i.toString().padStart(4, "0")}`;
+        keys.push(key);
+        parser.write(`"${key}": ${i}`);
+      }
+      parser.write("}");
+
+      expect(parser.isComplete).toBe(true);
+      const parsed = JSON.parse(parser.getHealed());
+      expect(Object.keys(parsed).length).toBe(500);
+      expect(parsed[keys[0]!]).toBe(0);
+      expect(parsed[keys[499]!]).toBe(499);
+    });
+
+    it("heals correctly at every step of large streaming input", () => {
+      // Stream a 200-element array character by character and verify every
+      // intermediate state is valid JSON.
+      const elements = Array.from({ length: 200 }, (_, i) => i);
+      const input = JSON.stringify(elements);
+      let invalidCount = 0;
+
+      for (let i = 0; i < input.length; i++) {
+        parser.write(input[i]!);
+        try {
+          JSON.parse(parser.getHealed());
+        } catch {
+          invalidCount++;
+        }
+      }
+      expect(invalidCount).toBe(0);
+      parser.end();
+      expect(parser.isComplete).toBe(true);
+    });
+
+    it("healing suffix is constant-time regardless of input size", () => {
+      // Feed a large chunk, then verify the healing suffix is short
+      // (O(depth), not O(input_length)).  Trailing comma is trimmed, then
+      // a single `]` is appended — net change is small.
+      const bigArray =
+        "[" + Array.from({ length: 1000 }, (_, i) => i).join(",") + ",";
+      parser.write(bigArray);
+
+      const healed = parser.getHealed();
+      const raw = parser.getRaw();
+      // Raw ends with `,`; healed trims it and appends `]`.
+      // So healed = raw[0..-2] + "]", same total length.
+      expect(healed.endsWith("]")).toBe(true);
+      expect(healed).not.toContain("null"); // no dummy padding values
+      expect(() => JSON.parse(healed)).not.toThrow();
+      // Verify the array is intact (999 is the last real element)
+      const parsed = JSON.parse(healed) as number[];
+      expect(parsed[parsed.length - 1]).toBe(999);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Sandbox integration simulation
+  // -----------------------------------------------------------------------
+
+  describe("sandbox integration simulation", () => {
+    /**
+     * Simulates the sandbox's tool-input-delta flow:
+     *  1. Host sends raw JSON deltas (chunks of tool arguments)
+     *  2. Sandbox feeds each delta into the parser
+     *  3. Sandbox parses the healed output and forwards as tool-input-partial
+     */
+    function simulateSandbox(deltas: string[]): Array<Record<string, unknown>> {
+      const parser = new IncrementalJsonParser();
+      const partials: Array<Record<string, unknown>> = [];
+
+      for (const delta of deltas) {
+        parser.write(delta);
+        const healed = parser.getHealed();
+        try {
+          const args = JSON.parse(healed);
+          if (typeof args === "object" && args !== null) {
+            partials.push(args as Record<string, unknown>);
+          }
+        } catch {
+          // Skip deltas that don't produce parseable JSON
+        }
+      }
+
+      return partials;
+    }
+
+    it("produces progressively richer partial arguments", () => {
+      const deltas = [
+        '{"loc',
+        'ation": "N',
+        "ew York",
+        '", "units": "met',
+        'ric"}',
+      ];
+
+      const partials = simulateSandbox(deltas);
+
+      expect(partials.length).toBe(5);
+      // First delta: partial key
+      expect(partials[0]).toEqual({ loc: null });
+      // Second: key complete with partial value
+      expect(partials[1]).toEqual({ location: "N" });
+      // Third: value growing
+      expect(partials[2]).toEqual({ location: "New York" });
+      // Fourth: second key partial
+      expect(partials[3]).toEqual({ location: "New York", units: "met" });
+      // Fifth: complete
+      expect(partials[4]).toEqual({ location: "New York", units: "metric" });
+    });
+
+    it("handles chart data streaming", () => {
+      const deltas = [
+        '{"data": [',
+        '{"x": 1, "y": ',
+        "10}",
+        ', {"x": 2, "y": 20',
+        "}",
+        "]}",
+      ];
+
+      const partials = simulateSandbox(deltas);
+
+      // After first delta: empty data array
+      expect(partials[0]).toEqual({ data: [] });
+      // After second: first point with partial y
+      expect(partials[1]).toEqual({ data: [{ x: 1, y: null }] });
+      // After third: first point complete
+      expect(partials[2]).toEqual({ data: [{ x: 1, y: 10 }] });
+      // After fourth: second point partial
+      expect(partials[3]).toEqual({ data: [{ x: 1, y: 10 }, { x: 2, y: 20 }] });
+      // After fifth: second point complete
+      expect(partials[4]).toEqual({
+        data: [
+          { x: 1, y: 10 },
+          { x: 2, y: 20 },
+        ],
+      });
+      // Final: complete
+      expect(partials[5]).toEqual({
+        data: [
+          { x: 1, y: 10 },
+          { x: 2, y: 20 },
+        ],
+      });
+    });
+
+    it("reset between tool calls works correctly", () => {
+      const parser = new IncrementalJsonParser();
+      const results: Array<Record<string, unknown>> = [];
+
+      // First tool call
+      for (const delta of ['{"a": ', "1}"]) {
+        parser.write(delta);
+      }
+      results.push(JSON.parse(parser.getHealed()));
+
+      // Reset (like sandbox does on tool-input)
+      parser.reset();
+
+      // Second tool call
+      for (const delta of ['{"b": ', "2}"]) {
+        parser.write(delta);
+      }
+      results.push(JSON.parse(parser.getHealed()));
+
+      expect(results).toEqual([{ a: 1 }, { b: 2 }]);
+    });
+
+    it("every partial is valid JSON", () => {
+      // Simulate realistic LLM streaming: character-by-character tool args
+      const fullArgs = '{"query": "climate change", "maxResults": 10, "filters": {"year": 2024, "language": "en"}}';
+      const parser = new IncrementalJsonParser();
+      let invalidCount = 0;
+
+      for (let i = 0; i < fullArgs.length; i++) {
+        parser.write(fullArgs[i]!);
+        try {
+          JSON.parse(parser.getHealed());
+        } catch {
+          invalidCount++;
+        }
+      }
+
+      expect(invalidCount).toBe(0);
+      expect(parser.isComplete).toBe(true);
+      expect(JSON.parse(parser.getHealed())).toEqual({
+        query: "climate change",
+        maxResults: 10,
+        filters: { year: 2024, language: "en" },
+      });
+    });
+  });
 });
