@@ -672,6 +672,7 @@ body {
   flex: 1;
   min-height: 0;
   overflow: visible;
+  position: relative; /* Anchor for floating annotation panel */
 }
 
 /* Annotations Toolbar Button */
@@ -807,7 +808,60 @@ body {
   padding: 0.25rem 0;
 }
 
-/* Page group headers */
+/* Floating panel in inline mode */
+.annotation-panel.floating {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 20;
+  border-left: 1px solid var(--bg200);
+  border-bottom: 1px solid var(--bg200);
+  border-radius: 0 0 0 8px;
+  box-shadow: -2px 2px 8px rgba(0, 0, 0, 0.15);
+  max-height: 100%;
+  width: 220px;
+}
+
+/* Accordion section headers */
+.annotation-section-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text100);
+  padding: 0.4rem 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--bg200);
+  user-select: none;
+  transition: background 0.1s ease;
+}
+.annotation-section-header:hover {
+  background: var(--bg100);
+}
+.annotation-section-header.current-page {
+  color: var(--text000);
+}
+.annotation-section-header.open {
+  color: var(--text000);
+}
+.annotation-section-chevron {
+  font-size: 0.6rem;
+  transition: transform 0.15s ease;
+}
+.annotation-section-header.open .annotation-section-chevron {
+  transform: rotate(180deg);
+}
+.annotation-section-body {
+  display: none;
+}
+.annotation-section-body.open {
+  display: block;
+}
+
+/* Legacy page group headers (fullscreen mode) */
 .annotation-page-group {
   font-size: 0.75rem;
   font-weight: 600;

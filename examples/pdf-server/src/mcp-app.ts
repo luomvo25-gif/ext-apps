@@ -1764,19 +1764,20 @@ function setAnnotationPanelOpen(open: boolean): void {
   annotationsBtn.classList.toggle("active", open);
   updateAnnotationsBadge();
 
+  // Always hide the legacy strip
+  stripEl.style.display = "none";
+  updateSearchBarOffset();
+
   if (currentDisplayMode === "inline") {
-    // Inline mode: use strip below toolbar, never show side panel
-    annotationsPanelEl.style.display = "none";
+    // Inline mode: floating panel over the canvas area
+    annotationsPanelEl.classList.toggle("floating", true);
+    annotationsPanelEl.style.display = open ? "" : "none";
     if (open) {
-      renderStrip();
-    } else {
-      stripEl.style.display = "none";
-      updateSearchBarOffset();
+      renderAnnotationPanel();
     }
   } else {
-    // Fullscreen mode: use side panel, never show strip
-    stripEl.style.display = "none";
-    updateSearchBarOffset();
+    // Fullscreen mode: side panel
+    annotationsPanelEl.classList.remove("floating");
     annotationsPanelEl.style.display = open ? "" : "none";
     if (open) {
       renderAnnotationPanel();
@@ -2003,13 +2004,11 @@ function renderStrip(): void {
   requestFitToContent();
 }
 
+/** Track which accordion section is open (e.g. "page-3" or "formFields"). */
+let openAccordionSection: string | null = null;
+
 function renderAnnotationPanel(): void {
   if (!annotationPanelOpen) return;
-  // In inline mode, delegate to the compact strip
-  if (currentDisplayMode === "inline") {
-    renderStrip();
-    return;
-  }
 
   annotationsPanelCountEl.textContent = String(sidebarItemCount());
 
@@ -2031,232 +2030,295 @@ function renderAnnotationPanel(): void {
 
   annotationsPanelListEl.innerHTML = "";
 
-  for (const pageNum of sortedPages) {
-    // Page group header
-    const header = document.createElement("div");
-    header.className =
-      "annotation-page-group" +
-      (pageNum === currentPage ? " current-page" : "");
-    header.textContent = `Page ${pageNum}`;
-    annotationsPanelListEl.appendChild(header);
-
-    for (const tracked of byPage.get(pageNum)!) {
-      const def = tracked.def;
-      const card = document.createElement("div");
-      card.className =
-        "annotation-card" +
-        (selectedAnnotationId === def.id ? " selected" : "");
-      card.dataset.annotationId = def.id;
-
-      const row = document.createElement("div");
-      row.className = "annotation-card-row";
-
-      // Color swatch
-      const swatch = document.createElement("div");
-      swatch.className = "annotation-card-swatch";
-      swatch.style.background = getAnnotationColor(def);
-      row.appendChild(swatch);
-
-      // Type label
-      const typeLabel = document.createElement("span");
-      typeLabel.className = "annotation-card-type";
-      typeLabel.textContent = getAnnotationLabel(def);
-      row.appendChild(typeLabel);
-
-      // Preview text
-      const preview = getAnnotationPreview(def);
-      if (preview) {
-        const previewEl = document.createElement("span");
-        previewEl.className = "annotation-card-preview";
-        previewEl.textContent = preview;
-        row.appendChild(previewEl);
-      }
-
-      // Delete button
-      const deleteBtn = document.createElement("button");
-      deleteBtn.className = "annotation-card-delete";
-      deleteBtn.title = "Delete annotation";
-      deleteBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 3h8M4.5 3V2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5v1M5 5.5v3M7 5.5v3M3 3l.5 7a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1L9 3"/></svg>`;
-      deleteBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        removeAnnotation(def.id);
-        persistAnnotations();
-      });
-      row.appendChild(deleteBtn);
-
-      // Expand chevron (only for annotations with content)
-      const hasContent = "content" in def && def.content;
-      if (hasContent) {
-        const expand = document.createElement("span");
-        expand.className = "annotation-card-expand";
-        expand.textContent = "▼";
-        row.appendChild(expand);
-      }
-
-      card.appendChild(row);
-
-      // Expandable content area
-      if (hasContent) {
-        const contentEl = document.createElement("div");
-        contentEl.className = "annotation-card-content";
-        contentEl.textContent = (def as { content: string }).content;
-        card.appendChild(contentEl);
-      }
-
-      // Click handler: select + expand/collapse + navigate to page + pulse annotation
-      card.addEventListener("click", () => {
-        if (hasContent) {
-          card.classList.toggle("expanded");
-        }
-        // Navigate to page if needed
-        if (def.page !== currentPage) {
-          goToPage(def.page);
-          // Wait for render then select + pulse
-          setTimeout(() => {
-            selectAnnotation(def.id);
-            pulseAnnotation(def.id);
-          }, 300);
-        } else {
-          selectAnnotation(def.id);
-          pulseAnnotation(def.id);
-          // Scroll the annotation into view
-          if (tracked.elements.length > 0) {
-            tracked.elements[0].scrollIntoView({
-              behavior: "smooth",
-              block: "center",
-            });
-          }
-        }
-      });
-
-      // Hover handler: pulse annotation on PDF
-      card.addEventListener("mouseenter", () => {
-        if (def.page === currentPage) {
-          pulseAnnotation(def.id);
-        }
-      });
-
-      // Double-click handler: send message to modify annotation
-      card.addEventListener("dblclick", (e) => {
-        e.stopPropagation();
-        const label = getAnnotationLabel(def);
-        const preview = getAnnotationPreview(def);
-        const desc = preview ? `${label} "${preview}"` : label;
-        app.sendMessage({
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Change this annotation to [describe desired change]: ${desc} (id: ${def.id}, page ${def.page})`,
-            },
-          ],
-        });
-      });
-
-      annotationsPanelListEl.appendChild(card);
+  // Auto-open section for current page if none is open
+  if (openAccordionSection === null) {
+    if (byPage.has(currentPage)) {
+      openAccordionSection = `page-${currentPage}`;
+    } else if (sortedPages.length > 0) {
+      openAccordionSection = `page-${sortedPages[0]}`;
+    } else if (formFieldValues.size > 0) {
+      openAccordionSection = "formFields";
     }
+  }
+
+  for (const pageNum of sortedPages) {
+    const sectionKey = `page-${pageNum}`;
+    const isOpen = openAccordionSection === sectionKey;
+    const annotations = byPage.get(pageNum)!;
+
+    appendAccordionSection(
+      `Page ${pageNum} (${annotations.length})`,
+      sectionKey,
+      isOpen,
+      pageNum === currentPage,
+      (body) => {
+        for (const tracked of annotations) {
+          body.appendChild(createAnnotationCard(tracked));
+        }
+      },
+    );
   }
 
   // Form fields section
   if (formFieldValues.size > 0) {
-    const header = document.createElement("div");
-    header.className = "annotation-page-group";
-    header.textContent = "Form Fields";
-    annotationsPanelListEl.appendChild(header);
-
-    for (const [name, value] of formFieldValues) {
-      const card = document.createElement("div");
-      card.className = "annotation-card";
-
-      const row = document.createElement("div");
-      row.className = "annotation-card-row";
-
-      // Color swatch (blue for form fields)
-      const swatch = document.createElement("div");
-      swatch.className = "annotation-card-swatch";
-      swatch.style.background = "#4a90d9";
-      row.appendChild(swatch);
-
-      // Field label
-      const label = getFormFieldLabel(name);
-      const nameEl = document.createElement("span");
-      nameEl.className = "annotation-card-type";
-      nameEl.textContent = label;
-      row.appendChild(nameEl);
-
-      // Field value preview
-      const displayValue =
-        typeof value === "boolean" ? (value ? "checked" : "unchecked") : value;
-      if (displayValue) {
-        const valueEl = document.createElement("span");
-        valueEl.className = "annotation-card-preview";
-        valueEl.textContent = displayValue;
-        row.appendChild(valueEl);
-      }
-
-      // Delete button
-      const deleteBtn = document.createElement("button");
-      deleteBtn.className = "annotation-card-delete";
-      deleteBtn.title = "Clear field";
-      deleteBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 3h8M4.5 3V2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5v1M5 5.5v3M7 5.5v3M3 3l.5 7a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1L9 3"/></svg>`;
-      deleteBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        formFieldValues.delete(name);
-        // Clear from annotation storage
-        if (pdfDocument) {
-          const ids = fieldNameToIds.get(name);
-          if (ids) {
-            for (const id of ids) {
-              pdfDocument.annotationStorage.remove(id);
-            }
-          }
+    const isOpen = openAccordionSection === "formFields";
+    appendAccordionSection(
+      `Form Fields (${formFieldValues.size})`,
+      "formFields",
+      isOpen,
+      false,
+      (body) => {
+        for (const [name, value] of formFieldValues) {
+          body.appendChild(createFormFieldCard(name, value));
         }
-        updateAnnotationsBadge();
-        renderAnnotationPanel();
-        renderPage();
-        persistAnnotations();
-      });
-      row.appendChild(deleteBtn);
-
-      // Click handler: navigate to page and focus form input
-      card.addEventListener("click", () => {
-        const fieldPage = fieldNameToPage.get(name) ?? 1;
-        const focusField = () => {
-          const input = formLayerEl.querySelector(
-            `[name="${CSS.escape(name)}"]`,
-          ) as HTMLElement | null;
-          if (input) {
-            input.focus();
-            input.scrollIntoView({ behavior: "smooth", block: "center" });
-          }
-        };
-        if (fieldPage !== currentPage) {
-          goToPage(fieldPage);
-          setTimeout(focusField, 300);
-        } else {
-          focusField();
-        }
-      });
-
-      // Double-click handler: send message to fill field
-      card.addEventListener("dblclick", (e) => {
-        e.stopPropagation();
-        const label = getFormFieldLabel(name);
-        app.sendMessage({
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Fill this field with [desired value]: "${label}" (name="${name}")`,
-            },
-          ],
-        });
-      });
-
-      card.appendChild(row);
-      annotationsPanelListEl.appendChild(card);
-    }
+      },
+    );
   }
+}
+
+function appendAccordionSection(
+  title: string,
+  sectionKey: string,
+  isOpen: boolean,
+  isCurrent: boolean,
+  populateBody: (body: HTMLElement) => void,
+): void {
+  const header = document.createElement("div");
+  header.className =
+    "annotation-section-header" +
+    (isCurrent ? " current-page" : "") +
+    (isOpen ? " open" : "");
+
+  const titleSpan = document.createElement("span");
+  titleSpan.textContent = title;
+  header.appendChild(titleSpan);
+
+  const chevron = document.createElement("span");
+  chevron.className = "annotation-section-chevron";
+  chevron.textContent = "▼";
+  header.appendChild(chevron);
+
+  header.addEventListener("click", () => {
+    openAccordionSection =
+      openAccordionSection === sectionKey ? null : sectionKey;
+    renderAnnotationPanel();
+  });
+
+  annotationsPanelListEl.appendChild(header);
+
+  const body = document.createElement("div");
+  body.className = "annotation-section-body" + (isOpen ? " open" : "");
+  if (isOpen) {
+    populateBody(body);
+  }
+  annotationsPanelListEl.appendChild(body);
+}
+
+function createAnnotationCard(tracked: TrackedAnnotation): HTMLElement {
+  const def = tracked.def;
+  const card = document.createElement("div");
+  card.className =
+    "annotation-card" + (selectedAnnotationId === def.id ? " selected" : "");
+  card.dataset.annotationId = def.id;
+
+  const row = document.createElement("div");
+  row.className = "annotation-card-row";
+
+  // Color swatch
+  const swatch = document.createElement("div");
+  swatch.className = "annotation-card-swatch";
+  swatch.style.background = getAnnotationColor(def);
+  row.appendChild(swatch);
+
+  // Type label
+  const typeLabel = document.createElement("span");
+  typeLabel.className = "annotation-card-type";
+  typeLabel.textContent = getAnnotationLabel(def);
+  row.appendChild(typeLabel);
+
+  // Preview text
+  const preview = getAnnotationPreview(def);
+  if (preview) {
+    const previewEl = document.createElement("span");
+    previewEl.className = "annotation-card-preview";
+    previewEl.textContent = preview;
+    row.appendChild(previewEl);
+  }
+
+  // Delete button
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "annotation-card-delete";
+  deleteBtn.title = "Delete annotation";
+  deleteBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 3h8M4.5 3V2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5v1M5 5.5v3M7 5.5v3M3 3l.5 7a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1L9 3"/></svg>`;
+  deleteBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    removeAnnotation(def.id);
+    persistAnnotations();
+  });
+  row.appendChild(deleteBtn);
+
+  // Expand chevron (only for annotations with content)
+  const hasContent = "content" in def && def.content;
+  if (hasContent) {
+    const expand = document.createElement("span");
+    expand.className = "annotation-card-expand";
+    expand.textContent = "▼";
+    row.appendChild(expand);
+  }
+
+  card.appendChild(row);
+
+  // Expandable content area
+  if (hasContent) {
+    const contentEl = document.createElement("div");
+    contentEl.className = "annotation-card-content";
+    contentEl.textContent = (def as { content: string }).content;
+    card.appendChild(contentEl);
+  }
+
+  // Click handler: select + expand/collapse + navigate to page + pulse annotation
+  card.addEventListener("click", () => {
+    if (hasContent) {
+      card.classList.toggle("expanded");
+    }
+    if (def.page !== currentPage) {
+      goToPage(def.page);
+      setTimeout(() => {
+        selectAnnotation(def.id);
+        pulseAnnotation(def.id);
+      }, 300);
+    } else {
+      selectAnnotation(def.id);
+      pulseAnnotation(def.id);
+      if (tracked.elements.length > 0) {
+        tracked.elements[0].scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+      }
+    }
+  });
+
+  // Hover handler: pulse annotation on PDF
+  card.addEventListener("mouseenter", () => {
+    if (def.page === currentPage) {
+      pulseAnnotation(def.id);
+    }
+  });
+
+  // Double-click handler: send message to modify annotation
+  card.addEventListener("dblclick", (e) => {
+    e.stopPropagation();
+    const label = getAnnotationLabel(def);
+    const previewText = getAnnotationPreview(def);
+    const desc = previewText ? `${label} "${previewText}"` : label;
+    app.sendMessage({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: `Change this annotation to [describe desired change]: ${desc} (id: ${def.id}, page ${def.page})`,
+        },
+      ],
+    });
+  });
+
+  return card;
+}
+
+function createFormFieldCard(
+  name: string,
+  value: string | boolean,
+): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "annotation-card";
+
+  const row = document.createElement("div");
+  row.className = "annotation-card-row";
+
+  // Color swatch (blue for form fields)
+  const swatch = document.createElement("div");
+  swatch.className = "annotation-card-swatch";
+  swatch.style.background = "#4a90d9";
+  row.appendChild(swatch);
+
+  // Field label
+  const label = getFormFieldLabel(name);
+  const nameEl = document.createElement("span");
+  nameEl.className = "annotation-card-type";
+  nameEl.textContent = label;
+  row.appendChild(nameEl);
+
+  // Field value preview
+  const displayValue =
+    typeof value === "boolean" ? (value ? "checked" : "unchecked") : value;
+  if (displayValue) {
+    const valueEl = document.createElement("span");
+    valueEl.className = "annotation-card-preview";
+    valueEl.textContent = displayValue;
+    row.appendChild(valueEl);
+  }
+
+  // Delete button
+  const deleteBtn = document.createElement("button");
+  deleteBtn.className = "annotation-card-delete";
+  deleteBtn.title = "Clear field";
+  deleteBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 3h8M4.5 3V2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5v1M5 5.5v3M7 5.5v3M3 3l.5 7a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1L9 3"/></svg>`;
+  deleteBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    formFieldValues.delete(name);
+    if (pdfDocument) {
+      const ids = fieldNameToIds.get(name);
+      if (ids) {
+        for (const id of ids) {
+          pdfDocument.annotationStorage.remove(id);
+        }
+      }
+    }
+    updateAnnotationsBadge();
+    renderAnnotationPanel();
+    renderPage();
+    persistAnnotations();
+  });
+  row.appendChild(deleteBtn);
+
+  // Click handler: navigate to page and focus form input
+  card.addEventListener("click", () => {
+    const fieldPage = fieldNameToPage.get(name) ?? 1;
+    const focusField = () => {
+      const input = formLayerEl.querySelector(
+        `[name="${CSS.escape(name)}"]`,
+      ) as HTMLElement | null;
+      if (input) {
+        input.focus();
+        input.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    };
+    if (fieldPage !== currentPage) {
+      goToPage(fieldPage);
+      setTimeout(focusField, 300);
+    } else {
+      focusField();
+    }
+  });
+
+  // Double-click handler: send message to fill field
+  card.addEventListener("dblclick", (e) => {
+    e.stopPropagation();
+    const fieldLabel = getFormFieldLabel(name);
+    app.sendMessage({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: `Fill this field with [desired value]: "${fieldLabel}" (name="${name}")`,
+        },
+      ],
+    });
+  });
+
+  card.appendChild(row);
+  return card;
 }
 
 function pulseAnnotation(id: string): void {
