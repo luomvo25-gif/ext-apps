@@ -556,17 +556,7 @@ body {
   z-index: 4; /* above annotation-layer (z-index: 3) so form inputs are clickable */
 }
 
-/* Style PDF.js form widgets to match viewer theme */
-#form-layer select {
-  font-size: inherit;
-  background: var(--bg000);
-  color: var(--text000);
-  border: 1px solid var(--bg300);
-  border-radius: 2px;
-}
-#form-layer select option {
-  padding: 1px 4px;
-}
+/* Style PDF.js form widgets — avoid overriding font-size (set by AnnotationLayer) */
 #form-layer select option:checked {
   background: light-dark(#d0e0ff, #335);
 }
