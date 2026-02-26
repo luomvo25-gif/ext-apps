@@ -147,6 +147,9 @@ const fieldNameToIds = new Map<string, string[]>();
 const fieldNameToPage = new Map<string, number>();
 // PDF.js form field name → human-readable label (from PDF TU / alternativeText)
 const fieldNameToLabel = new Map<string, string>();
+// Cached result of doc.getFieldObjects() — needed for AnnotationLayer reset button support
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let cachedFieldObjects: Record<string, any[]> | null = null;
 
 // DOM Elements
 const mainEl = document.querySelector(".main") as HTMLElement;
@@ -2251,8 +2254,10 @@ async function buildFieldNameMap(
   fieldNameToIds.clear();
   fieldNameToPage.clear();
   fieldNameToLabel.clear();
+  cachedFieldObjects = null;
   try {
     const fieldObjects = await doc.getFieldObjects();
+    cachedFieldObjects = fieldObjects as Record<string, any[]> | null;
     if (fieldObjects) {
       for (const [name, fields] of Object.entries(fieldObjects)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2749,6 +2754,7 @@ async function renderPage() {
           renderForms: true,
           linkService,
           annotationStorage: pdfDocument.annotationStorage,
+          fieldObjects: cachedFieldObjects,
         } as any);
 
         // Fix listbox font sizes: the default AnnotationLayer CSS uses
