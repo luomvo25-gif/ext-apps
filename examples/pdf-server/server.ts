@@ -68,12 +68,144 @@ const SWEEP_INTERVAL_MS = 30_000; // 30 seconds
 /** Fixed batch window: when commands are present, wait this long before returning to let more accumulate */
 const POLL_BATCH_WAIT_MS = 200;
 
+// =============================================================================
+// Annotation Types
+// =============================================================================
+
+/** Rectangle in PDF coordinate space (bottom-left origin, in PDF points) */
+const RectSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number(),
+});
+
+const StampLabel = z.enum([
+  "APPROVED",
+  "DRAFT",
+  "CONFIDENTIAL",
+  "FINAL",
+  "VOID",
+  "REJECTED",
+]);
+
+const AnnotationBase = z.object({
+  id: z.string(),
+  page: z.number().min(1),
+});
+
+const HighlightAnnotation = AnnotationBase.extend({
+  type: z.literal("highlight"),
+  rects: z.array(RectSchema).min(1),
+  color: z.string().optional(),
+  content: z.string().optional(),
+});
+
+const UnderlineAnnotation = AnnotationBase.extend({
+  type: z.literal("underline"),
+  rects: z.array(RectSchema).min(1),
+  color: z.string().optional(),
+});
+
+const StrikethroughAnnotation = AnnotationBase.extend({
+  type: z.literal("strikethrough"),
+  rects: z.array(RectSchema).min(1),
+  color: z.string().optional(),
+});
+
+const NoteAnnotation = AnnotationBase.extend({
+  type: z.literal("note"),
+  x: z.number(),
+  y: z.number(),
+  content: z.string(),
+  color: z.string().optional(),
+});
+
+const RectangleAnnotation = AnnotationBase.extend({
+  type: z.literal("rectangle"),
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number(),
+  color: z.string().optional(),
+  fillColor: z.string().optional(),
+});
+
+const FreetextAnnotation = AnnotationBase.extend({
+  type: z.literal("freetext"),
+  x: z.number(),
+  y: z.number(),
+  content: z.string(),
+  fontSize: z.number().optional(),
+  color: z.string().optional(),
+});
+
+const StampAnnotation = AnnotationBase.extend({
+  type: z.literal("stamp"),
+  x: z.number(),
+  y: z.number(),
+  label: StampLabel,
+  color: z.string().optional(),
+  rotation: z.number().optional(),
+});
+
+const PdfAnnotationDef = z.discriminatedUnion("type", [
+  HighlightAnnotation,
+  UnderlineAnnotation,
+  StrikethroughAnnotation,
+  NoteAnnotation,
+  RectangleAnnotation,
+  FreetextAnnotation,
+  StampAnnotation,
+]);
+
+/** Partial annotation update — id + type required, rest optional */
+const PdfAnnotationUpdate = z.union([
+  HighlightAnnotation.partial().required({ id: true, type: true }),
+  UnderlineAnnotation.partial().required({ id: true, type: true }),
+  StrikethroughAnnotation.partial().required({ id: true, type: true }),
+  NoteAnnotation.partial().required({ id: true, type: true }),
+  RectangleAnnotation.partial().required({ id: true, type: true }),
+  FreetextAnnotation.partial().required({ id: true, type: true }),
+  StampAnnotation.partial().required({ id: true, type: true }),
+]);
+
+const FormField = z.object({
+  name: z.string(),
+  value: z.union([z.string(), z.boolean()]),
+});
+
+// =============================================================================
+// Command Queue (shared across stateless server instances)
+// =============================================================================
+
 export type PdfCommand =
   | { type: "navigate"; page: number }
   | { type: "search"; query: string }
   | { type: "find"; query: string }
   | { type: "search_navigate"; matchIndex: number }
-  | { type: "zoom"; scale: number };
+  | { type: "zoom"; scale: number }
+  | {
+      type: "add_annotations";
+      annotations: z.infer<typeof PdfAnnotationDef>[];
+    }
+  | {
+      type: "update_annotations";
+      annotations: z.infer<typeof PdfAnnotationUpdate>[];
+    }
+  | { type: "remove_annotations"; ids: string[] }
+  | {
+      type: "highlight_text";
+      id: string;
+      query: string;
+      page?: number;
+      color?: string;
+      content?: string;
+    }
+  | {
+      type: "fill_form";
+      fields: z.infer<typeof FormField>[];
+    };
 
 interface QueueEntry {
   commands: PdfCommand[];
@@ -707,23 +839,43 @@ Actions:
 - search: Search text and highlight matches in UI. Requires \`query\`. Results (with excerpts, pages, offsets) appear in model context.
 - find: Search text silently (no UI change). Requires \`query\`. Results appear in model context only.
 - search_navigate: Jump to a search match. Requires \`matchIndex\` (from search/find results).
-- zoom: Set zoom level. Requires \`scale\` (0.5–3.0).`,
+- zoom: Set zoom level. Requires \`scale\` (0.5–3.0).
+- add_annotations: Add annotations to the PDF. Requires \`annotations\` array.
+- update_annotations: Partially update existing annotations. Requires \`annotations\` array (id + type required).
+- remove_annotations: Remove annotations by ID. Requires \`ids\` array.
+- highlight_text: Find text and highlight it. Requires \`query\`. Optional \`page\`, \`color\`, \`content\`.
+- fill_form: Fill form fields. Requires \`fields\` array of { name, value }.
+
+Annotation types: highlight, underline, strikethrough, note, rectangle, freetext, stamp.
+Coordinates are in PDF points (72 dpi), bottom-left origin. Colors are CSS strings (e.g. "#ff0000", "rgba(255,0,0,0.5)").
+Stamp labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED.`,
       inputSchema: {
         viewUUID: z
           .string()
           .describe("The viewUUID of the PDF viewer (from display_pdf result)"),
         action: z
-          .enum(["navigate", "search", "find", "search_navigate", "zoom"])
+          .enum([
+            "navigate",
+            "search",
+            "find",
+            "search_navigate",
+            "zoom",
+            "add_annotations",
+            "update_annotations",
+            "remove_annotations",
+            "highlight_text",
+            "fill_form",
+          ])
           .describe("Action to perform"),
         page: z
           .number()
           .min(1)
           .optional()
-          .describe("Page number (for navigate)"),
+          .describe("Page number (for navigate, highlight_text)"),
         query: z
           .string()
           .optional()
-          .describe("Search text (for search / find)"),
+          .describe("Search text (for search / find / highlight_text)"),
         matchIndex: z
           .number()
           .min(0)
@@ -735,6 +887,30 @@ Actions:
           .max(3.0)
           .optional()
           .describe("Zoom scale, 1.0 = 100% (for zoom)"),
+        annotations: z
+          .array(z.record(z.string(), z.unknown()))
+          .optional()
+          .describe(
+            "Annotation definitions (for add_annotations) or partial updates (for update_annotations)",
+          ),
+        ids: z
+          .array(z.string())
+          .optional()
+          .describe("Annotation IDs (for remove_annotations)"),
+        color: z
+          .string()
+          .optional()
+          .describe("Color override (for highlight_text)"),
+        content: z
+          .string()
+          .optional()
+          .describe("Tooltip/note content (for highlight_text)"),
+        fields: z
+          .array(FormField)
+          .optional()
+          .describe(
+            "Form fields to fill (for fill_form): { name, value } where value is string or boolean",
+          ),
       },
     },
     async ({
@@ -744,6 +920,11 @@ Actions:
       query,
       matchIndex,
       scale,
+      annotations,
+      ids,
+      color,
+      content,
+      fields,
     }): Promise<CallToolResult> => {
       let description: string;
       switch (action) {
@@ -796,6 +977,120 @@ Actions:
             };
           enqueueCommand(uuid, { type: "zoom", scale });
           description = `zoom to ${Math.round(scale * 100)}%`;
+          break;
+        case "add_annotations": {
+          if (!annotations || annotations.length === 0)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "add_annotations requires `annotations` array",
+                },
+              ],
+              isError: true,
+            };
+          // Validate each annotation
+          const parsed = [];
+          for (const raw of annotations) {
+            const result = PdfAnnotationDef.safeParse(raw);
+            if (!result.success) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Invalid annotation: ${result.error.message}`,
+                  },
+                ],
+                isError: true,
+              };
+            }
+            parsed.push(result.data);
+          }
+          enqueueCommand(uuid, {
+            type: "add_annotations",
+            annotations: parsed,
+          });
+          description = `add ${parsed.length} annotation(s)`;
+          break;
+        }
+        case "update_annotations": {
+          if (!annotations || annotations.length === 0)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "update_annotations requires `annotations` array",
+                },
+              ],
+              isError: true,
+            };
+          const parsedUpdates = [];
+          for (const raw of annotations) {
+            const result = PdfAnnotationUpdate.safeParse(raw);
+            if (!result.success) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Invalid annotation update: ${result.error.message}`,
+                  },
+                ],
+                isError: true,
+              };
+            }
+            parsedUpdates.push(result.data);
+          }
+          enqueueCommand(uuid, {
+            type: "update_annotations",
+            annotations: parsedUpdates,
+          });
+          description = `update ${parsedUpdates.length} annotation(s)`;
+          break;
+        }
+        case "remove_annotations":
+          if (!ids || ids.length === 0)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "remove_annotations requires `ids` array",
+                },
+              ],
+              isError: true,
+            };
+          enqueueCommand(uuid, { type: "remove_annotations", ids });
+          description = `remove ${ids.length} annotation(s)`;
+          break;
+        case "highlight_text": {
+          if (!query)
+            return {
+              content: [
+                { type: "text", text: "highlight_text requires `query`" },
+              ],
+              isError: true,
+            };
+          const id = `ht_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          enqueueCommand(uuid, {
+            type: "highlight_text",
+            id,
+            query,
+            page,
+            color,
+            content,
+          });
+          description = `highlight text "${query}"${page ? ` on page ${page}` : ""}`;
+          break;
+        }
+        case "fill_form":
+          if (!fields || fields.length === 0)
+            return {
+              content: [
+                { type: "text", text: "fill_form requires `fields` array" },
+              ],
+              isError: true,
+            };
+          enqueueCommand(uuid, { type: "fill_form", fields });
+          description = `fill ${fields.length} form field(s)`;
           break;
         default:
           return {

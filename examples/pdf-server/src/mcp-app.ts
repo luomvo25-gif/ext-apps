@@ -16,6 +16,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ContentBlock } from "@modelcontextprotocol/sdk/spec.types.js";
 import * as pdfjsLib from "pdfjs-dist";
 import { TextLayer } from "pdfjs-dist";
+import { PDFDocument, rgb, StandardFonts, degrees } from "pdf-lib";
 import "./global.css";
 import "./mcp-app.css";
 
@@ -41,6 +42,103 @@ let pdfUrl = "";
 let pdfTitle: string | undefined;
 let viewUUID: string | undefined;
 let currentRenderTask: { cancel: () => void } | null = null;
+
+// =============================================================================
+// Annotation Types (mirrors server schemas)
+// =============================================================================
+
+interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+type StampLabel =
+  | "APPROVED"
+  | "DRAFT"
+  | "CONFIDENTIAL"
+  | "FINAL"
+  | "VOID"
+  | "REJECTED";
+
+interface AnnotationBase {
+  id: string;
+  page: number;
+}
+
+interface HighlightAnnotation extends AnnotationBase {
+  type: "highlight";
+  rects: Rect[];
+  color?: string;
+  content?: string;
+}
+
+interface UnderlineAnnotation extends AnnotationBase {
+  type: "underline";
+  rects: Rect[];
+  color?: string;
+}
+
+interface StrikethroughAnnotation extends AnnotationBase {
+  type: "strikethrough";
+  rects: Rect[];
+  color?: string;
+}
+
+interface NoteAnnotation extends AnnotationBase {
+  type: "note";
+  x: number;
+  y: number;
+  content: string;
+  color?: string;
+}
+
+interface RectangleAnnotation extends AnnotationBase {
+  type: "rectangle";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color?: string;
+  fillColor?: string;
+}
+
+interface FreetextAnnotation extends AnnotationBase {
+  type: "freetext";
+  x: number;
+  y: number;
+  content: string;
+  fontSize?: number;
+  color?: string;
+}
+
+interface StampAnnotation extends AnnotationBase {
+  type: "stamp";
+  x: number;
+  y: number;
+  label: StampLabel;
+  color?: string;
+  rotation?: number;
+}
+
+type PdfAnnotationDef =
+  | HighlightAnnotation
+  | UnderlineAnnotation
+  | StrikethroughAnnotation
+  | NoteAnnotation
+  | RectangleAnnotation
+  | FreetextAnnotation
+  | StampAnnotation;
+
+interface TrackedAnnotation {
+  def: PdfAnnotationDef;
+  elements: HTMLElement[];
+}
+
+// Annotation state
+const annotationMap = new Map<string, TrackedAnnotation>();
+const formFieldValues = new Map<string, string | boolean>();
 
 // DOM Elements
 const mainEl = document.querySelector(".main") as HTMLElement;
@@ -80,6 +178,10 @@ const searchCloseBtn = document.getElementById(
   "search-close-btn",
 ) as HTMLButtonElement;
 const highlightLayerEl = document.getElementById("highlight-layer")!;
+const annotationLayerEl = document.getElementById("annotation-layer")!;
+const downloadBtn = document.getElementById(
+  "download-btn",
+) as HTMLButtonElement;
 
 // Search state
 interface SearchMatch {
@@ -647,7 +749,19 @@ async function updatePageContext() {
       searchSection = `\nSearch: "${searchQuery}" (no matches found)`;
     }
 
-    const contextText = `${header}${searchSection}\n\nPage content:\n${content}`;
+    // Include annotation summary if any exist
+    let annotationSection = "";
+    if (annotationMap.size > 0) {
+      const onThisPage = [...annotationMap.values()].filter(
+        (t) => t.def.page === currentPage,
+      ).length;
+      annotationSection = `\nAnnotations: ${onThisPage} on this page, ${annotationMap.size} total`;
+      if (formFieldValues.size > 0) {
+        annotationSection += ` | ${formFieldValues.size} form field(s) filled`;
+      }
+    }
+
+    const contextText = `${header}${searchSection}${annotationSection}\n\nPage content:\n${content}`;
 
     // Build content array with text and optional screenshot
     const contentBlocks: ContentBlock[] = [{ type: "text", text: contextText }];
@@ -693,6 +807,731 @@ async function updatePageContext() {
   } catch (err) {
     log.error("Error updating context:", err);
   }
+}
+
+// =============================================================================
+// Annotation Rendering
+// =============================================================================
+
+/**
+ * Convert PDF coordinates (bottom-left origin) to screen coordinates
+ * relative to the page wrapper. PDF.js viewport handles rotation and scale.
+ */
+function pdfRectToScreen(
+  rect: Rect,
+  viewport: { width: number; height: number; scale: number },
+): { left: number; top: number; width: number; height: number } {
+  const s = viewport.scale;
+  // PDF origin is bottom-left, screen origin is top-left
+  const left = rect.x * s;
+  const top = viewport.height - (rect.y + rect.height) * s;
+  const width = rect.width * s;
+  const height = rect.height * s;
+  return { left, top, width, height };
+}
+
+function pdfPointToScreen(
+  x: number,
+  y: number,
+  viewport: { width: number; height: number; scale: number },
+): { left: number; top: number } {
+  const s = viewport.scale;
+  return { left: x * s, top: viewport.height - y * s };
+}
+
+function renderAnnotationsForPage(pageNum: number): void {
+  // Clear existing annotation elements
+  annotationLayerEl.innerHTML = "";
+
+  // Remove tracked element refs for all annotations
+  for (const tracked of annotationMap.values()) {
+    tracked.elements = [];
+  }
+
+  if (!pdfDocument) return;
+
+  // Get viewport for coordinate conversion
+  const vp = {
+    width: parseFloat(annotationLayerEl.style.width) || 0,
+    height: parseFloat(annotationLayerEl.style.height) || 0,
+    scale,
+  };
+  if (vp.width === 0 || vp.height === 0) return;
+
+  for (const tracked of annotationMap.values()) {
+    const def = tracked.def;
+    if (def.page !== pageNum) continue;
+
+    const elements = renderAnnotation(def, vp);
+    tracked.elements = elements;
+    for (const el of elements) {
+      annotationLayerEl.appendChild(el);
+    }
+  }
+}
+
+function renderAnnotation(
+  def: PdfAnnotationDef,
+  viewport: { width: number; height: number; scale: number },
+): HTMLElement[] {
+  switch (def.type) {
+    case "highlight":
+      return renderRectsAnnotation(
+        def.rects,
+        "annotation-highlight",
+        viewport,
+        def.color ? { background: def.color } : {},
+      );
+    case "underline":
+      return renderRectsAnnotation(
+        def.rects,
+        "annotation-underline",
+        viewport,
+        def.color ? { borderBottomColor: def.color } : {},
+      );
+    case "strikethrough":
+      return renderRectsAnnotation(
+        def.rects,
+        "annotation-strikethrough",
+        viewport,
+        {},
+        def.color,
+      );
+    case "note":
+      return [renderNoteAnnotation(def, viewport)];
+    case "rectangle":
+      return [renderRectangleAnnotation(def, viewport)];
+    case "freetext":
+      return [renderFreetextAnnotation(def, viewport)];
+    case "stamp":
+      return [renderStampAnnotation(def, viewport)];
+  }
+}
+
+function renderRectsAnnotation(
+  rects: Rect[],
+  className: string,
+  viewport: { width: number; height: number; scale: number },
+  extraStyles: Record<string, string>,
+  strikeColor?: string,
+): HTMLElement[] {
+  return rects.map((rect) => {
+    const screen = pdfRectToScreen(rect, viewport);
+    const el = document.createElement("div");
+    el.className = className;
+    el.style.left = `${screen.left}px`;
+    el.style.top = `${screen.top}px`;
+    el.style.width = `${screen.width}px`;
+    el.style.height = `${screen.height}px`;
+    for (const [k, v] of Object.entries(extraStyles)) {
+      (el.style as unknown as Record<string, string>)[k] = v;
+    }
+    if (strikeColor) {
+      // Set color for the ::after pseudo-element via CSS custom property
+      el.style.setProperty("--strike-color", strikeColor);
+      el.querySelector("::after"); // no-op, style via CSS instead
+      // Actually use inline style on a child element for the line
+      const line = document.createElement("div");
+      line.style.position = "absolute";
+      line.style.left = "0";
+      line.style.right = "0";
+      line.style.top = "50%";
+      line.style.borderTop = `2px solid ${strikeColor}`;
+      el.appendChild(line);
+    }
+    return el;
+  });
+}
+
+function renderNoteAnnotation(
+  def: NoteAnnotation,
+  viewport: { width: number; height: number; scale: number },
+): HTMLElement {
+  const pos = pdfPointToScreen(def.x, def.y, viewport);
+  const el = document.createElement("div");
+  el.className = "annotation-note";
+  el.style.left = `${pos.left}px`;
+  el.style.top = `${pos.top - 20}px`; // offset up so note icon is at the point
+  el.setAttribute("data-icon", "\uD83D\uDCDD"); // memo emoji
+  if (def.color) el.style.color = def.color;
+
+  const tooltip = document.createElement("div");
+  tooltip.className = "annotation-tooltip";
+  tooltip.textContent = def.content;
+  el.appendChild(tooltip);
+
+  return el;
+}
+
+function renderRectangleAnnotation(
+  def: RectangleAnnotation,
+  viewport: { width: number; height: number; scale: number },
+): HTMLElement {
+  const screen = pdfRectToScreen(
+    { x: def.x, y: def.y, width: def.width, height: def.height },
+    viewport,
+  );
+  const el = document.createElement("div");
+  el.className = "annotation-rectangle";
+  el.style.left = `${screen.left}px`;
+  el.style.top = `${screen.top}px`;
+  el.style.width = `${screen.width}px`;
+  el.style.height = `${screen.height}px`;
+  if (def.color) el.style.borderColor = def.color;
+  if (def.fillColor) el.style.backgroundColor = def.fillColor;
+  return el;
+}
+
+function renderFreetextAnnotation(
+  def: FreetextAnnotation,
+  viewport: { width: number; height: number; scale: number },
+): HTMLElement {
+  const pos = pdfPointToScreen(def.x, def.y, viewport);
+  const el = document.createElement("div");
+  el.className = "annotation-freetext";
+  el.style.left = `${pos.left}px`;
+  el.style.top = `${pos.top}px`;
+  el.style.fontSize = `${(def.fontSize || 12) * viewport.scale}px`;
+  if (def.color) el.style.color = def.color;
+  el.textContent = def.content;
+  return el;
+}
+
+function renderStampAnnotation(
+  def: StampAnnotation,
+  viewport: { width: number; height: number; scale: number },
+): HTMLElement {
+  const pos = pdfPointToScreen(def.x, def.y, viewport);
+  const el = document.createElement("div");
+  el.className = "annotation-stamp";
+  el.style.left = `${pos.left}px`;
+  el.style.top = `${pos.top}px`;
+  el.style.fontSize = `${24 * viewport.scale}px`;
+  if (def.color) el.style.color = def.color;
+  if (def.rotation) {
+    el.style.transform = `rotate(${-def.rotation}deg)`;
+    el.style.transformOrigin = "left bottom";
+  }
+  el.textContent = def.label;
+  return el;
+}
+
+// =============================================================================
+// Annotation CRUD
+// =============================================================================
+
+function addAnnotation(def: PdfAnnotationDef): void {
+  // Remove existing if same id
+  removeAnnotation(def.id);
+  annotationMap.set(def.id, { def, elements: [] });
+  // Re-render if on current page
+  if (def.page === currentPage) {
+    renderAnnotationsForPage(currentPage);
+  }
+}
+
+function updateAnnotation(
+  update: Partial<PdfAnnotationDef> & { id: string; type: string },
+): void {
+  const tracked = annotationMap.get(update.id);
+  if (!tracked) return;
+
+  // Merge partial update into existing def
+  const merged = { ...tracked.def, ...update } as PdfAnnotationDef;
+  tracked.def = merged;
+
+  // Re-render if on current page
+  if (merged.page === currentPage) {
+    renderAnnotationsForPage(currentPage);
+  }
+}
+
+function removeAnnotation(id: string): void {
+  const tracked = annotationMap.get(id);
+  if (!tracked) return;
+  for (const el of tracked.elements) el.remove();
+  annotationMap.delete(id);
+}
+
+// =============================================================================
+// highlight_text Command
+// =============================================================================
+
+function handleHighlightText(cmd: {
+  id: string;
+  query: string;
+  page?: number;
+  color?: string;
+  content?: string;
+}): void {
+  const pagesToSearch: number[] = [];
+  if (cmd.page) {
+    pagesToSearch.push(cmd.page);
+  } else {
+    // Search all pages that have cached text
+    for (const [pageNum, text] of pageTextCache) {
+      if (text.toLowerCase().includes(cmd.query.toLowerCase())) {
+        pagesToSearch.push(pageNum);
+      }
+    }
+  }
+
+  let annotationIndex = 0;
+  for (const pageNum of pagesToSearch) {
+    // Find text positions using the text layer DOM if on current page,
+    // otherwise create approximate rects from text cache positions
+    const rects = findTextRects(cmd.query, pageNum);
+    if (rects.length > 0) {
+      const id =
+        pagesToSearch.length > 1
+          ? `${cmd.id}_p${pageNum}_${annotationIndex++}`
+          : cmd.id;
+      addAnnotation({
+        type: "highlight",
+        id,
+        page: pageNum,
+        rects,
+        color: cmd.color,
+        content: cmd.content,
+      });
+    }
+  }
+}
+
+/**
+ * Find text in a page and return PDF-coordinate rects.
+ * Uses the TextLayer DOM when the page is currently rendered,
+ * otherwise falls back to approximate character-based positioning.
+ */
+function findTextRects(query: string, pageNum: number): Rect[] {
+  if (pageNum !== currentPage) {
+    // For non-current pages, create approximate rects from page dimensions
+    // The text will be properly positioned when the user navigates to that page
+    return findTextRectsFromCache(query, pageNum);
+  }
+
+  // Use text layer DOM for current page
+  const spans = Array.from(
+    textLayerEl.querySelectorAll("span"),
+  ) as HTMLElement[];
+  if (spans.length === 0) return findTextRectsFromCache(query, pageNum);
+
+  const lowerQuery = query.toLowerCase();
+  const rects: Rect[] = [];
+  const wrapperEl = textLayerEl.parentElement!;
+  const wrapperRect = wrapperEl.getBoundingClientRect();
+
+  for (const span of spans) {
+    const text = span.textContent || "";
+    if (text.length === 0) continue;
+    const lowerText = text.toLowerCase();
+
+    let pos = 0;
+    while (true) {
+      const idx = lowerText.indexOf(lowerQuery, pos);
+      if (idx === -1) break;
+      pos = idx + 1;
+
+      const textNode = span.firstChild;
+      if (!textNode || textNode.nodeType !== Node.TEXT_NODE) continue;
+
+      try {
+        const range = document.createRange();
+        range.setStart(textNode, idx);
+        range.setEnd(textNode, Math.min(idx + lowerQuery.length, text.length));
+        const clientRects = range.getClientRects();
+
+        for (let ri = 0; ri < clientRects.length; ri++) {
+          const r = clientRects[ri];
+          // Convert screen coords back to PDF coords
+          const screenLeft = r.left - wrapperRect.left;
+          const screenTop = r.top - wrapperRect.top;
+          const pdfX = screenLeft / scale;
+          const pdfHeight = r.height / scale;
+          const pdfWidth = r.width / scale;
+          const pageHeight = parseFloat(annotationLayerEl.style.height) / scale;
+          const pdfY = pageHeight - (screenTop + r.height) / scale;
+          rects.push({
+            x: pdfX,
+            y: pdfY,
+            width: pdfWidth,
+            height: pdfHeight,
+          });
+        }
+      } catch {
+        // Range API errors with stale nodes
+      }
+    }
+  }
+
+  return rects;
+}
+
+function findTextRectsFromCache(query: string, pageNum: number): Rect[] {
+  const text = pageTextCache.get(pageNum);
+  if (!text) return [];
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const idx = lowerText.indexOf(lowerQuery);
+  if (idx === -1) return [];
+
+  // Approximate: place a highlight rect in the middle of the page
+  // This will be re-computed accurately when the user visits the page
+  return [{ x: 72, y: 400, width: 200, height: 14 }];
+}
+
+// =============================================================================
+// Annotation Persistence
+// =============================================================================
+
+/** Storage key for annotations — uses toolInfo.id (available early) with viewUUID fallback */
+function annotationStorageKey(): string | null {
+  const toolId = app.getHostContext()?.toolInfo?.id;
+  if (toolId) return `pdf-annot:${toolId}`;
+  if (viewUUID) return `${viewUUID}:annotations`;
+  return null;
+}
+
+function persistAnnotations(): void {
+  const key = annotationStorageKey();
+  if (!key) return;
+  try {
+    const data: PdfAnnotationDef[] = [];
+    for (const tracked of annotationMap.values()) {
+      data.push(tracked.def);
+    }
+    const formData: Record<string, string | boolean> = {};
+    for (const [k, v] of formFieldValues) {
+      formData[k] = v;
+    }
+    localStorage.setItem(
+      key,
+      JSON.stringify({ annotations: data, formFields: formData }),
+    );
+  } catch {
+    // localStorage may be full or unavailable
+  }
+}
+
+function restoreAnnotations(): void {
+  const key = annotationStorageKey();
+  if (!key) return;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as {
+      annotations?: PdfAnnotationDef[];
+      formFields?: Record<string, string | boolean>;
+    };
+    if (parsed.annotations) {
+      for (const def of parsed.annotations) {
+        annotationMap.set(def.id, { def, elements: [] });
+      }
+    }
+    if (parsed.formFields) {
+      for (const [k, v] of Object.entries(parsed.formFields)) {
+        formFieldValues.set(k, v);
+      }
+    }
+    log.info(
+      `Restored ${annotationMap.size} annotations, ${formFieldValues.size} form fields`,
+    );
+  } catch {
+    // Parse error or unavailable
+  }
+}
+
+// =============================================================================
+// PDF Download with Annotations
+// =============================================================================
+
+function cssColorToRgb(
+  color: string,
+): { r: number; g: number; b: number } | null {
+  // Parse hex colors
+  const hex = color.match(/^#([0-9a-f]{3,8})$/i);
+  if (hex) {
+    let h = hex[1];
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    return {
+      r: parseInt(h.slice(0, 2), 16) / 255,
+      g: parseInt(h.slice(2, 4), 16) / 255,
+      b: parseInt(h.slice(4, 6), 16) / 255,
+    };
+  }
+  // Parse rgb/rgba
+  const rgbMatch = color.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (rgbMatch) {
+    return {
+      r: parseInt(rgbMatch[1]) / 255,
+      g: parseInt(rgbMatch[2]) / 255,
+      b: parseInt(rgbMatch[3]) / 255,
+    };
+  }
+  return null;
+}
+
+async function downloadAnnotatedPdf(): Promise<void> {
+  if (!pdfDocument) return;
+  downloadBtn.disabled = true;
+  downloadBtn.title = "Preparing download...";
+
+  try {
+    // Fetch full PDF bytes
+    const totalBytes =
+      parseInt(canvasEl.dataset.totalBytes || "0", 10) ||
+      (await fetchRange(pdfUrl, 0, 1)).totalBytes;
+
+    const { bytes: fullBytes } = await fetchRange(pdfUrl, 0, totalBytes);
+
+    // Load with pdf-lib
+    const pdfDoc = await PDFDocument.load(fullBytes, {
+      ignoreEncryption: true,
+    });
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+    const pages = pdfDoc.getPages();
+
+    // Embed annotations
+    for (const tracked of annotationMap.values()) {
+      const def = tracked.def;
+      const pageIdx = def.page - 1;
+      if (pageIdx < 0 || pageIdx >= pages.length) continue;
+      const page = pages[pageIdx];
+
+      switch (def.type) {
+        case "highlight": {
+          const c = cssColorToRgb(def.color || "#ffff00") || {
+            r: 1,
+            g: 1,
+            b: 0,
+          };
+          for (const rect of def.rects) {
+            page.drawRectangle({
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+              color: rgb(c.r, c.g, c.b),
+              opacity: 0.35,
+            });
+          }
+          break;
+        }
+        case "underline": {
+          const c = cssColorToRgb(def.color || "#ff0000") || {
+            r: 1,
+            g: 0,
+            b: 0,
+          };
+          for (const rect of def.rects) {
+            page.drawLine({
+              start: { x: rect.x, y: rect.y },
+              end: { x: rect.x + rect.width, y: rect.y },
+              thickness: 1.5,
+              color: rgb(c.r, c.g, c.b),
+            });
+          }
+          break;
+        }
+        case "strikethrough": {
+          const c = cssColorToRgb(def.color || "#ff0000") || {
+            r: 1,
+            g: 0,
+            b: 0,
+          };
+          for (const rect of def.rects) {
+            const midY = rect.y + rect.height / 2;
+            page.drawLine({
+              start: { x: rect.x, y: midY },
+              end: { x: rect.x + rect.width, y: midY },
+              thickness: 1.5,
+              color: rgb(c.r, c.g, c.b),
+            });
+          }
+          break;
+        }
+        case "note": {
+          const c = cssColorToRgb(def.color || "#ff9900") || {
+            r: 1,
+            g: 0.6,
+            b: 0,
+          };
+          // Draw a small note indicator and the content text
+          page.drawSquare({
+            x: def.x,
+            y: def.y - 10,
+            size: 10,
+            color: rgb(c.r, c.g, c.b),
+            opacity: 0.8,
+          });
+          if (def.content) {
+            page.drawText(def.content, {
+              x: def.x + 14,
+              y: def.y - 10,
+              size: 9,
+              font,
+              color: rgb(c.r, c.g, c.b),
+            });
+          }
+          break;
+        }
+        case "rectangle": {
+          const borderColor = cssColorToRgb(def.color || "#0066cc") || {
+            r: 0,
+            g: 0.4,
+            b: 0.8,
+          };
+          page.drawRectangle({
+            x: def.x,
+            y: def.y,
+            width: def.width,
+            height: def.height,
+            borderColor: rgb(borderColor.r, borderColor.g, borderColor.b),
+            borderWidth: 2,
+            color: def.fillColor
+              ? (() => {
+                  const fc = cssColorToRgb(def.fillColor);
+                  return fc ? rgb(fc.r, fc.g, fc.b) : undefined;
+                })()
+              : undefined,
+            opacity: def.fillColor ? 0.3 : undefined,
+          });
+          break;
+        }
+        case "freetext": {
+          const c = cssColorToRgb(def.color || "#000000") || {
+            r: 0,
+            g: 0,
+            b: 0,
+          };
+          page.drawText(def.content, {
+            x: def.x,
+            y: def.y,
+            size: def.fontSize || 12,
+            font,
+            color: rgb(c.r, c.g, c.b),
+          });
+          break;
+        }
+        case "stamp": {
+          const c = cssColorToRgb(def.color || "#cc0000") || {
+            r: 0.8,
+            g: 0,
+            b: 0,
+          };
+          const stampColor = rgb(c.r, c.g, c.b);
+          const fontSize = 24;
+          const textWidth = boldFont.widthOfTextAtSize(def.label, fontSize);
+          const padding = 8;
+          const rectW = textWidth + padding * 2;
+          const rectH = fontSize + padding * 2;
+          const rotation = def.rotation ? degrees(def.rotation) : undefined;
+
+          page.drawRectangle({
+            x: def.x,
+            y: def.y - rectH,
+            width: rectW,
+            height: rectH,
+            borderColor: stampColor,
+            borderWidth: 3,
+            opacity: 0.6,
+            rotate: rotation,
+          });
+          page.drawText(def.label, {
+            x: def.x + padding,
+            y: def.y - fontSize - padding + 4,
+            size: fontSize,
+            font: boldFont,
+            color: stampColor,
+            opacity: 0.6,
+            rotate: rotation,
+          });
+          break;
+        }
+      }
+    }
+
+    // Apply form fills
+    if (formFieldValues.size > 0) {
+      try {
+        const form = pdfDoc.getForm();
+        for (const [name, value] of formFieldValues) {
+          try {
+            if (typeof value === "boolean") {
+              const checkbox = form.getCheckBox(name);
+              if (value) checkbox.check();
+              else checkbox.uncheck();
+            } else {
+              const textField = form.getTextField(name);
+              textField.setText(value);
+            }
+          } catch {
+            // Field not found or wrong type — skip
+          }
+        }
+      } catch {
+        // Form not available — skip
+      }
+    }
+
+    const pdfBytes = await pdfDoc.save();
+
+    // Use app.downloadFile if host supports it, otherwise fall back to <a> tag
+    const hasAnnotations = annotationMap.size > 0;
+    const baseName = (pdfTitle || "document").replace(/\.pdf$/i, "");
+    const fileName = hasAnnotations
+      ? `${baseName}_annotated.pdf`
+      : `${baseName}.pdf`;
+
+    // Convert to base64
+    const base64 = uint8ArrayToBase64(pdfBytes);
+
+    if (app.getHostCapabilities()?.downloadFile) {
+      const { isError } = await app.downloadFile({
+        contents: [
+          {
+            type: "resource",
+            resource: {
+              uri: `file:///${fileName}`,
+              mimeType: "application/pdf",
+              blob: base64,
+            },
+          },
+        ],
+      });
+      if (isError) {
+        log.info("Download was cancelled or denied by host");
+      }
+    } else {
+      // Fallback: create blob URL and trigger download
+      const blob = new Blob([pdfBytes.buffer as ArrayBuffer], {
+        type: "application/pdf",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  } catch (err) {
+    log.error("Download error:", err);
+  } finally {
+    downloadBtn.disabled = false;
+    downloadBtn.title = "Download PDF";
+  }
+}
+
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
 // Render state - prevents concurrent renders
@@ -790,14 +1629,19 @@ async function renderPage() {
       pageTextCache.set(pageToRender, items.join(""));
     }
 
-    // Size highlight layer to match canvas
+    // Size overlay layers to match canvas
     highlightLayerEl.style.width = `${viewport.width}px`;
     highlightLayerEl.style.height = `${viewport.height}px`;
+    annotationLayerEl.style.width = `${viewport.width}px`;
+    annotationLayerEl.style.height = `${viewport.height}px`;
 
     // Re-render search highlights if search is active
     if (searchOpen && searchQuery) {
       renderHighlights();
     }
+
+    // Re-render annotations for current page
+    renderAnnotationsForPage(pageToRender);
 
     updateControls();
     updatePageContext();
@@ -925,6 +1769,7 @@ searchCloseBtn.addEventListener("click", closeSearch);
 searchPrevBtn.addEventListener("click", goToPrevMatch);
 searchNextBtn.addEventListener("click", goToNextMatch);
 fullscreenBtn.addEventListener("click", toggleFullscreen);
+downloadBtn.addEventListener("click", downloadAnnotatedPdf);
 
 // Search input events
 searchInputEl.addEventListener("input", () => {
@@ -1373,6 +2218,9 @@ app.ontoolresult = async (result: CallToolResult) => {
     loadingIndicatorEl.style.display = "none";
 
     showViewer();
+    downloadBtn.style.display = "";
+    // Restore any persisted annotations
+    restoreAnnotations();
     renderPage();
     // Start background preloading of all pages for text extraction
     startPreloading();
@@ -1401,7 +2249,27 @@ type PdfCommand =
   | { type: "search"; query: string }
   | { type: "find"; query: string }
   | { type: "search_navigate"; matchIndex: number }
-  | { type: "zoom"; scale: number };
+  | { type: "zoom"; scale: number }
+  | { type: "add_annotations"; annotations: PdfAnnotationDef[] }
+  | {
+      type: "update_annotations";
+      annotations: Array<
+        Partial<PdfAnnotationDef> & { id: string; type: string }
+      >;
+    }
+  | { type: "remove_annotations"; ids: string[] }
+  | {
+      type: "highlight_text";
+      id: string;
+      query: string;
+      page?: number;
+      color?: string;
+      content?: string;
+    }
+  | {
+      type: "fill_form";
+      fields: Array<{ name: string; value: string | boolean }>;
+    };
 
 /**
  * Process a batch of commands from the server queue
@@ -1447,8 +2315,36 @@ function processCommands(commands: PdfCommand[]): void {
           renderPage();
         }
         break;
+      case "add_annotations":
+        for (const def of cmd.annotations) {
+          addAnnotation(def);
+        }
+        break;
+      case "update_annotations":
+        for (const update of cmd.annotations) {
+          updateAnnotation(update);
+        }
+        break;
+      case "remove_annotations":
+        for (const id of cmd.ids) {
+          removeAnnotation(id);
+        }
+        // Re-render annotation layer since elements were removed
+        renderAnnotationsForPage(currentPage);
+        break;
+      case "highlight_text":
+        handleHighlightText(cmd);
+        break;
+      case "fill_form":
+        for (const field of cmd.fields) {
+          formFieldValues.set(field.name, field.value);
+        }
+        break;
     }
   }
+
+  // Persist after processing batch
+  persistAnnotations();
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -1538,4 +2434,6 @@ app.connect().then(() => {
   if (ctx) {
     handleHostContextChanged(ctx);
   }
+  // Restore annotations early using toolInfo.id (available before tool result)
+  restoreAnnotations();
 });

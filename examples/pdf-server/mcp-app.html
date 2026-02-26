@@ -61,6 +61,14 @@
               +
             </button>
             <button
+              id="download-btn"
+              class="download-btn"
+              title="Download PDF"
+              style="display: none"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8m0 0l-3-3m3 3l3-3"/><path d="M2 12v2h12v-2"/></svg>
+            </button>
+            <button
               id="search-btn"
               class="search-btn"
               title="Search (Ctrl+F)"
@@ -111,6 +119,7 @@
         <div class="canvas-container">
           <div class="page-wrapper">
             <canvas id="pdf-canvas"></canvas>
+            <div id="annotation-layer" class="annotation-layer"></div>
             <div id="highlight-layer" class="highlight-layer"></div>
             <div id="text-layer" class="text-layer"></div>
           </div>
