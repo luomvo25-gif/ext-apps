@@ -103,6 +103,7 @@ interface RectangleAnnotation extends AnnotationBase {
   height: number;
   color?: string;
   fillColor?: string;
+  rotation?: number;
 }
 
 interface FreetextAnnotation extends AnnotationBase {
@@ -143,6 +144,8 @@ const formFieldValues = new Map<string, string | boolean>();
 
 // Selection & interaction state
 let selectedAnnotationId: string | null = null;
+let interactionMode: "resize" | "rotate" = "resize";
+let focusedFieldName: string | null = null;
 
 // Undo/Redo
 interface EditEntry {
@@ -862,17 +865,36 @@ async function updatePageContext() {
           "\nAnnotations on this page (visible in screenshot):";
         for (const t of onThisPage) {
           const d = t.def;
+          const selected = d.id === selectedAnnotationId ? " (SELECTED)" : "";
           if ("rects" in d && d.rects.length > 0) {
             const r = d.rects[0];
-            annotationSection += `\n  [${d.id}] ${d.type} at (${r.x},${r.y}) ${r.width}x${r.height}`;
+            annotationSection += `\n  [${d.id}] ${d.type} at (${r.x},${r.y}) ${r.width}x${r.height}${selected}`;
           } else if ("x" in d && "y" in d) {
-            annotationSection += `\n  [${d.id}] ${d.type} at (${d.x},${d.y})`;
+            annotationSection += `\n  [${d.id}] ${d.type} at (${d.x},${d.y})${selected}`;
           }
         }
       }
     }
 
-    const contextText = `${header}${searchSection}${annotationSection}\n\nPage content:\n${content}`;
+    // Include focused field or selected annotation info
+    let focusSection = "";
+    if (selectedAnnotationId) {
+      const tracked = annotationMap.get(selectedAnnotationId);
+      if (tracked) {
+        const d = tracked.def;
+        focusSection = `\nSelected: annotation [${d.id}] (${d.type})`;
+      }
+    }
+    if (focusedFieldName) {
+      const label = getFormFieldLabel(focusedFieldName);
+      const value = formFieldValues.get(focusedFieldName);
+      focusSection += `\nFocused field: "${label}" (name="${focusedFieldName}")`;
+      if (value !== undefined) {
+        focusSection += ` = ${JSON.stringify(value)}`;
+      }
+    }
+
+    const contextText = `${header}${searchSection}${annotationSection}${focusSection}\n\nPage content:\n${content}`;
 
     // Build content array with text and optional screenshot
     const contentBlocks: ContentBlock[] = [{ type: "text", text: contextText }];
@@ -1022,6 +1044,10 @@ function applyEdit(entry: EditEntry, reverse: boolean): void {
 function selectAnnotation(id: string | null): void {
   const prev = selectedAnnotationId;
   selectedAnnotationId = id;
+  // Reset interaction mode when selecting a new annotation
+  if (id !== prev) {
+    interactionMode = "resize";
+  }
 
   // Remove selection visuals from previous
   if (prev) {
@@ -1053,6 +1079,8 @@ function selectAnnotation(id: string | null): void {
 
   // Sync sidebar
   syncSidebarSelection();
+  // Update model context with selection info
+  updatePageContext();
 }
 
 function syncSidebarSelection(): void {
@@ -1064,12 +1092,17 @@ function syncSidebarSelection(): void {
   }
 }
 
+/** Types that support toggling between resize and rotate via double-click. */
+const RESIZABLE_TYPES = new Set<string>(["rectangle", "stamp"]);
+
 function showHandles(tracked: TrackedAnnotation): void {
   const def = tracked.def;
-  if (def.type === "rectangle" && tracked.elements.length > 0) {
-    const el = tracked.elements[0];
-    // Make parent relative for handle positioning
-    el.style.position = "absolute";
+  if (!RESIZABLE_TYPES.has(def.type) || tracked.elements.length === 0) return;
+
+  const el = tracked.elements[0];
+  const hasWidthHeight = "width" in def && "height" in def;
+
+  if (interactionMode === "resize" && hasWidthHeight) {
     for (const corner of ["nw", "ne", "sw", "se"] as const) {
       const handle = document.createElement("div");
       handle.className = `annotation-handle ${corner}`;
@@ -1077,8 +1110,8 @@ function showHandles(tracked: TrackedAnnotation): void {
       setupResizeHandle(handle, tracked, corner);
       el.appendChild(handle);
     }
-  } else if (def.type === "stamp" && tracked.elements.length > 0) {
-    const el = tracked.elements[0];
+  } else {
+    // Rotate mode (or fallback for types without width/height)
     const handle = document.createElement("div");
     handle.className = "annotation-handle-rotate";
     setupRotateHandle(handle, tracked);
@@ -1118,6 +1151,16 @@ function setupAnnotationInteraction(
       startDrag(e, tracked);
     }
   });
+
+  // Double-click to toggle resize/rotate mode (for applicable types)
+  if (RESIZABLE_TYPES.has(tracked.def.type)) {
+    el.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      interactionMode = interactionMode === "resize" ? "rotate" : "resize";
+      // Re-render handles
+      selectAnnotation(tracked.def.id);
+    });
+  }
 }
 
 function startDrag(e: MouseEvent, tracked: TrackedAnnotation): void {
@@ -1291,7 +1334,7 @@ function setupRotateHandle(
     e.stopPropagation();
     e.preventDefault();
 
-    const def = tracked.def as StampAnnotation;
+    const def = tracked.def as StampAnnotation | RectangleAnnotation;
     const beforeDef = { ...def };
     const el = tracked.elements[0];
     const rect = el.getBoundingClientRect();
@@ -1405,6 +1448,13 @@ function paintAnnotationsOnCanvas(
           viewport,
         );
         ctx.save();
+        if (def.rotation) {
+          const cx = s.left + s.width / 2;
+          const cy = s.top + s.height / 2;
+          ctx.translate(cx, cy);
+          ctx.rotate((-def.rotation * Math.PI) / 180);
+          ctx.translate(-cx, -cy);
+        }
         if (def.fillColor) {
           ctx.globalAlpha = 0.3;
           ctx.fillStyle = def.fillColor;
@@ -1605,6 +1655,10 @@ function renderRectangleAnnotation(
   el.style.height = `${screen.height}px`;
   if (def.color) el.style.borderColor = def.color;
   if (def.fillColor) el.style.backgroundColor = def.fillColor;
+  if (def.rotation) {
+    el.style.transform = `rotate(${-def.rotation}deg)`;
+    el.style.transformOrigin = "center center";
+  }
   return el;
 }
 
@@ -2082,6 +2136,23 @@ function renderAnnotationPanel(): void {
         }
       });
 
+      // Double-click handler: send message to modify annotation
+      card.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        const label = getAnnotationLabel(def);
+        const preview = getAnnotationPreview(def);
+        const desc = preview ? `${label} "${preview}"` : label;
+        app.sendMessage({
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Change this annotation to [describe desired change]: ${desc} (id: ${def.id}, page ${def.page})`,
+            },
+          ],
+        });
+      });
+
       annotationsPanelListEl.appendChild(card);
     }
   }
@@ -2165,6 +2236,21 @@ function renderAnnotationPanel(): void {
         } else {
           focusField();
         }
+      });
+
+      // Double-click handler: send message to fill field
+      card.addEventListener("dblclick", (e) => {
+        e.stopPropagation();
+        const label = getFormFieldLabel(name);
+        app.sendMessage({
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Fill this field with [desired value]: "${label}" (name="${name}")`,
+            },
+          ],
+        });
       });
 
       card.appendChild(row);
@@ -3397,14 +3483,16 @@ formLayerEl.addEventListener("input", (e) => {
   persistAnnotations();
 });
 
-// Track form field focus to sync the strip
+// Track form field focus to sync the strip and model context
 formLayerEl.addEventListener(
   "focusin",
   (e) => {
     const target = e.target as HTMLInputElement | HTMLSelectElement;
     const fieldName = target.name;
-    if (!fieldName || currentDisplayMode !== "inline" || !annotationPanelOpen)
-      return;
+    if (!fieldName) return;
+    focusedFieldName = fieldName;
+    updatePageContext();
+    if (currentDisplayMode !== "inline" || !annotationPanelOpen) return;
     // Find the strip item index for this field
     const idx = stripItems.findIndex(
       (item) => item.kind === "formField" && item.id === fieldName,
@@ -3412,6 +3500,18 @@ formLayerEl.addEventListener(
     if (idx >= 0 && idx !== stripIndex) {
       stripIndex = idx;
       renderStrip();
+    }
+  },
+  true,
+);
+
+// Clear focused field on blur
+formLayerEl.addEventListener(
+  "focusout",
+  () => {
+    if (focusedFieldName) {
+      focusedFieldName = null;
+      updatePageContext();
     }
   },
   true,
