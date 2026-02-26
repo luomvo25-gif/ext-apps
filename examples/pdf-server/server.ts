@@ -771,8 +771,41 @@ async function extractFormSchema(
     }
   }
 
+  // Collect alternativeText labels from per-page annotations
+  // (getFieldObjects doesn't include them)
+  const fieldLabels = new Map<string, string>();
+  try {
+    for (let i = 1; i <= pdfDoc.numPages; i++) {
+      const page = await pdfDoc.getPage(i);
+      const annotations = await page.getAnnotations();
+      for (const ann of annotations) {
+        if (ann.fieldName && ann.alternativeText) {
+          fieldLabels.set(ann.fieldName, ann.alternativeText);
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // Use labels as titles where available
+  for (const [name, prop] of Object.entries(properties)) {
+    const label = fieldLabels.get(name);
+    if (label) {
+      prop.title = label;
+    }
+  }
+
+  // If any editable field has a mechanical name (no human-readable label),
+  // elicitation would be confusing — return null to skip it.
+  const hasMechanicalNames = Object.keys(properties).some((name) => {
+    if (fieldLabels.has(name)) return false;
+    return /[[\]().]/.test(name) || /^[A-Z0-9_]+$/.test(name);
+  });
+
   pdfDoc.destroy();
   if (Object.keys(properties).length === 0) return null;
+  if (hasMechanicalNames) return null;
 
   return { type: "object", properties };
 }
