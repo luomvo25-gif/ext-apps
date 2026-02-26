@@ -234,7 +234,7 @@ export function createServer(): McpServer {
     {
       title: "Show Map",
       description:
-        "Display an interactive world map. Specify the view with either a bounding box (`west`/`south`/`east`/`north`) or a center point (`latitude`/`longitude`) with optional `radiusKm` (default 50). Optionally pass initial `markers`.",
+        "Display an interactive world map. Specify the view with either a bounding box (`west`/`south`/`east`/`north`) or a center point (`latitude`/`longitude`) with optional `radiusKm` (default 50). Optionally pass initial `markers` (useful when showing multiple points; skip for a single location as the map already centers there).",
       inputSchema: {
         west: z
           .number()

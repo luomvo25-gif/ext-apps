@@ -822,7 +822,8 @@ interface MarkerDef {
 
 interface TrackedMarker extends MarkerDef {
   id: string;
-  entity: any; // Cesium.Entity
+  pointEntity: any; // Cesium.Entity for the dot
+  labelEntity: any; // Cesium.Entity for the billboard label (or null)
 }
 
 type MapCommand =
@@ -943,18 +944,20 @@ function flyToBoundingBox(
  */
 function renderLabelImage(text: string): string {
   const dpr = window.devicePixelRatio || 1;
-  const fontSize = 13 * dpr;
+  const fontSize = Math.round(13 * dpr);
   const font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-  const padX = 8 * dpr;
-  const padY = 5 * dpr;
-  const radius = 5 * dpr;
+  const padX = Math.round(8 * dpr);
+  const padY = Math.round(5 * dpr);
+  const radius = Math.round(5 * dpr);
 
   // Measure text
   const measure = document.createElement("canvas").getContext("2d")!;
   measure.font = font;
   const metrics = measure.measureText(text);
   const textW = Math.ceil(metrics.width);
-  const textH = fontSize; // approximate em height
+  const ascent = Math.ceil(metrics.actualBoundingBoxAscent || fontSize * 0.8);
+  const descent = Math.ceil(metrics.actualBoundingBoxDescent || fontSize * 0.2);
+  const textH = ascent + descent;
 
   const w = textW + padX * 2;
   const h = textH + padY * 2;
@@ -966,25 +969,16 @@ function renderLabelImage(text: string): string {
 
   // Rounded rect background
   ctx.beginPath();
-  ctx.moveTo(radius, 0);
-  ctx.lineTo(w - radius, 0);
-  ctx.quadraticCurveTo(w, 0, w, radius);
-  ctx.lineTo(w, h - radius);
-  ctx.quadraticCurveTo(w, h, w - radius, h);
-  ctx.lineTo(radius, h);
-  ctx.quadraticCurveTo(0, h, 0, h - radius);
-  ctx.lineTo(0, radius);
-  ctx.quadraticCurveTo(0, 0, radius, 0);
-  ctx.closePath();
+  ctx.roundRect(0, 0, w, h, radius);
   ctx.fillStyle = "rgba(30, 30, 30, 0.78)";
   ctx.fill();
 
-  // Text
+  // Text — use alphabetic baseline with computed ascent for precise centering
   ctx.font = font;
-  ctx.textBaseline = "middle";
+  ctx.textBaseline = "alphabetic";
   ctx.textAlign = "left";
   ctx.fillStyle = "#fff";
-  ctx.fillText(text, padX, h / 2);
+  ctx.fillText(text, padX, padY + ascent);
 
   return canvas.toDataURL("image/png");
 }
@@ -1015,36 +1009,42 @@ function addMarker(
   const cesiumColor = parseCesiumColor(color || "red");
 
   const dpr = window.devicePixelRatio || 1;
-  const entityOptions: any = {
+
+  // Point entity (the colored dot)
+  const pointEntity = cesiumViewer.entities.add({
     position,
     point: {
       pixelSize: 12,
       color: cesiumColor,
       outlineColor: Cesium.Color.WHITE,
       outlineWidth: 2,
-      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-    },
-  };
-
-  if (label) {
-    entityOptions.billboard = {
-      image: renderLabelImage(label),
-      scale: 1 / dpr,
-      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-      pixelOffset: new Cesium.Cartesian2(0, -14),
-      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
-    };
+    },
+  });
+
+  // Label entity (separate so it doesn't conflict with point rendering)
+  let labelEntity: any = null;
+  if (label) {
+    labelEntity = cesiumViewer.entities.add({
+      position,
+      billboard: {
+        image: renderLabelImage(label),
+        scale: 1 / dpr,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -12),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
   }
 
-  const entity = cesiumViewer.entities.add(entityOptions);
   markerMap.set(id, {
     id,
     latitude: lat,
     longitude: lon,
     label,
     color,
-    entity,
+    pointEntity,
+    labelEntity,
   });
   updateCopyButton();
   persistMarkers();
@@ -1068,34 +1068,47 @@ function updateMarker(
     log.warn("updateMarker: unknown id", id);
     return;
   }
-  const entity = tracked.entity;
 
   if (updates.latitude != null || updates.longitude != null) {
     const lat = updates.latitude ?? tracked.latitude;
     const lon = updates.longitude ?? tracked.longitude;
-    entity.position = Cesium.Cartesian3.fromDegrees(lon, lat);
+    const pos = Cesium.Cartesian3.fromDegrees(lon, lat);
+    tracked.pointEntity.position = pos;
+    if (tracked.labelEntity) tracked.labelEntity.position = pos;
     tracked.latitude = lat;
     tracked.longitude = lon;
   }
 
   if (updates.color != null) {
-    entity.point.color = parseCesiumColor(updates.color);
+    tracked.pointEntity.point.color = parseCesiumColor(updates.color);
     tracked.color = updates.color;
   }
 
   if (updates.label !== undefined) {
     const dpr = window.devicePixelRatio || 1;
     if (updates.label) {
-      entity.billboard = {
-        image: renderLabelImage(updates.label),
-        scale: 1 / dpr,
-        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-        pixelOffset: new Cesium.Cartesian2(0, -14),
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      };
-    } else {
-      entity.billboard = undefined;
+      if (tracked.labelEntity) {
+        // Update existing label billboard
+        tracked.labelEntity.billboard.image = renderLabelImage(updates.label);
+        tracked.labelEntity.billboard.scale = 1 / dpr;
+      } else {
+        // Create new label entity
+        tracked.labelEntity = viewer!.entities.add({
+          position: tracked.pointEntity.position.getValue(
+            Cesium.JulianDate.now(),
+          ),
+          billboard: {
+            image: renderLabelImage(updates.label),
+            scale: 1 / dpr,
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+            pixelOffset: new Cesium.Cartesian2(0, -12),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
+      }
+    } else if (tracked.labelEntity) {
+      viewer!.entities.remove(tracked.labelEntity);
+      tracked.labelEntity = null;
     }
     tracked.label = updates.label || undefined;
   }
@@ -1114,7 +1127,8 @@ function removeMarker(cesiumViewer: any, id: string): void {
     log.warn("removeMarker: unknown id", id);
     return;
   }
-  cesiumViewer.entities.remove(tracked.entity);
+  cesiumViewer.entities.remove(tracked.pointEntity);
+  if (tracked.labelEntity) cesiumViewer.entities.remove(tracked.labelEntity);
   markerMap.delete(id);
   updateCopyButton();
   persistMarkers();
