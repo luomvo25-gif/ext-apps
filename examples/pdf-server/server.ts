@@ -175,6 +175,11 @@ const FormField = z.object({
   value: z.union([z.string(), z.boolean()]),
 });
 
+const PageInterval = z.object({
+  start: z.number().min(1).optional(),
+  end: z.number().min(1).optional(),
+});
+
 // =============================================================================
 // Command Queue (shared across stateless server instances)
 // =============================================================================
@@ -205,7 +210,34 @@ export type PdfCommand =
   | {
       type: "fill_form";
       fields: z.infer<typeof FormField>[];
+    }
+  | {
+      type: "get_pages";
+      requestId: string;
+      intervals: Array<{ start?: number; end?: number }>;
+      getText: boolean;
+      getScreenshots: boolean;
     };
+
+// =============================================================================
+// Pending get_pages Requests (request-response bridge via client)
+// =============================================================================
+
+const GET_PAGES_TIMEOUT_MS = 60_000; // 60s — rendering many pages can be slow
+
+interface PageDataEntry {
+  page: number;
+  text?: string;
+  image?: string; // base64 PNG
+}
+
+interface PendingPageRequest {
+  resolve: (data: PageDataEntry[]) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const pendingPageRequests = new Map<string, PendingPageRequest>();
 
 interface QueueEntry {
   commands: PdfCommand[];
@@ -1100,6 +1132,159 @@ Stamp labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED.`,
       }
       return {
         content: [{ type: "text", text: `Queued: ${description}` }],
+      };
+    },
+  );
+
+  // Tool: get_pages - Get text and/or screenshots from pages (offscreen, no navigation)
+  server.registerTool(
+    "get_pages",
+    {
+      title: "Get PDF Pages",
+      description: `Get text content and/or screenshots from specific pages without navigating the viewer.
+Pages are specified as intervals with optional start/end (1-indexed). Omit start for beginning, omit end for end of document.
+Examples: [{start:1, end:5}] for pages 1-5, [{}] for all pages, [{start:3, end:3}] for just page 3, [{start:10}] for page 10 onward.
+Max 20 pages per request. Does not affect the user's current view.`,
+      inputSchema: {
+        viewUUID: z
+          .string()
+          .describe("The viewUUID of the PDF viewer (from display_pdf result)"),
+        intervals: z
+          .array(PageInterval)
+          .min(1)
+          .default([{}])
+          .describe(
+            "Page ranges. Each has optional start/end. [{}] = all pages.",
+          ),
+        getText: z
+          .boolean()
+          .default(true)
+          .describe("Include text content for each page"),
+        getScreenshots: z
+          .boolean()
+          .default(false)
+          .describe("Include page screenshots (PNG images)"),
+      },
+    },
+    async ({
+      viewUUID: uuid,
+      intervals,
+      getText,
+      getScreenshots,
+    }): Promise<CallToolResult> => {
+      if (!getText && !getScreenshots) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "At least one of getText or getScreenshots must be true",
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const requestId = randomUUID();
+
+      // Enqueue command for client to process offscreen
+      enqueueCommand(uuid, {
+        type: "get_pages",
+        requestId,
+        intervals,
+        getText,
+        getScreenshots,
+      });
+
+      // Wait for client to render and submit results
+      let pageData: PageDataEntry[];
+      try {
+        pageData = await new Promise<PageDataEntry[]>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            pendingPageRequests.delete(requestId);
+            reject(new Error("Timeout waiting for page data from viewer"));
+          }, GET_PAGES_TIMEOUT_MS);
+          pendingPageRequests.set(requestId, { resolve, reject, timer });
+        });
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      // Format as MCP content blocks — interleaved text + image per page
+      const content: Array<
+        | { type: "text"; text: string }
+        | { type: "image"; data: string; mimeType: string }
+      > = [];
+      for (const entry of pageData) {
+        if (entry.text != null) {
+          content.push({
+            type: "text",
+            text: `--- Page ${entry.page} ---\n${entry.text}`,
+          });
+        }
+        if (entry.image) {
+          content.push({
+            type: "image",
+            data: entry.image,
+            mimeType: "image/png",
+          });
+        }
+      }
+      if (content.length === 0) {
+        content.push({ type: "text", text: "No page data returned" });
+      }
+      return { content };
+    },
+  );
+
+  // Tool: submit_page_data (app-only) - Client submits rendered page data
+  registerAppTool(
+    server,
+    "submit_page_data",
+    {
+      title: "Submit Page Data",
+      description:
+        "Submit rendered page data for a get_pages request (used by viewer)",
+      inputSchema: {
+        requestId: z
+          .string()
+          .describe("The request ID from the get_pages command"),
+        pages: z
+          .array(
+            z.object({
+              page: z.number(),
+              text: z.string().optional(),
+              image: z.string().optional().describe("Base64 PNG image data"),
+            }),
+          )
+          .describe("Page data entries"),
+      },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ requestId, pages }): Promise<CallToolResult> => {
+      const pending = pendingPageRequests.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timer);
+        pendingPageRequests.delete(requestId);
+        pending.resolve(pages);
+        return {
+          content: [
+            { type: "text", text: `Submitted ${pages.length} page(s)` },
+          ],
+        };
+      }
+      return {
+        content: [
+          { type: "text", text: `No pending request for ${requestId}` },
+        ],
+        isError: true,
       };
     },
   );

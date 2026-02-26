@@ -1181,6 +1181,130 @@ function findTextRectsFromCache(query: string, pageNum: number): Rect[] {
 }
 
 // =============================================================================
+// get_pages — Offscreen rendering for model analysis
+// =============================================================================
+
+const MAX_GET_PAGES = 20;
+const SCREENSHOT_MAX_DIM = 768; // Max pixel dimension for screenshots
+
+/**
+ * Expand intervals into a sorted deduplicated list of page numbers,
+ * clamped to [1, totalPages].
+ */
+function expandIntervals(
+  intervals: Array<{ start?: number; end?: number }>,
+): number[] {
+  const pages = new Set<number>();
+  for (const iv of intervals) {
+    const s = Math.max(1, iv.start ?? 1);
+    const e = Math.min(totalPages, iv.end ?? totalPages);
+    for (let p = s; p <= e; p++) pages.add(p);
+  }
+  return [...pages].sort((a, b) => a - b);
+}
+
+/**
+ * Render a single page to an offscreen canvas and return base64 PNG.
+ * Does not affect the visible canvas or text layer.
+ */
+async function renderPageOffscreen(pageNum: number): Promise<string> {
+  if (!pdfDocument) throw new Error("No PDF loaded");
+  const page = await pdfDocument.getPage(pageNum);
+  const baseViewport = page.getViewport({ scale: 1.0 });
+
+  // Scale down to fit within SCREENSHOT_MAX_DIM
+  const maxDim = Math.max(baseViewport.width, baseViewport.height);
+  const renderScale =
+    maxDim > SCREENSHOT_MAX_DIM ? SCREENSHOT_MAX_DIM / maxDim : 1.0;
+  const viewport = page.getViewport({ scale: renderScale });
+
+  const canvas = document.createElement("canvas");
+  const dpr = 1; // No retina scaling for model screenshots
+  canvas.width = viewport.width * dpr;
+  canvas.height = viewport.height * dpr;
+  const ctx = canvas.getContext("2d")!;
+  ctx.scale(dpr, dpr);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (page.render as any)({ canvasContext: ctx, viewport }).promise;
+
+  // Extract base64 (strip data URL prefix)
+  const dataUrl = canvas.toDataURL("image/png");
+  return dataUrl.split(",")[1];
+}
+
+async function handleGetPages(cmd: {
+  requestId: string;
+  intervals: Array<{ start?: number; end?: number }>;
+  getText: boolean;
+  getScreenshots: boolean;
+}): Promise<void> {
+  const allPages = expandIntervals(cmd.intervals);
+  const pages = allPages.slice(0, MAX_GET_PAGES);
+
+  log.info(
+    `get_pages: ${pages.length} pages (${pages[0]}..${pages[pages.length - 1]}), text=${cmd.getText}, screenshots=${cmd.getScreenshots}`,
+  );
+
+  const results: Array<{
+    page: number;
+    text?: string;
+    image?: string;
+  }> = [];
+
+  for (const pageNum of pages) {
+    const entry: { page: number; text?: string; image?: string } = {
+      page: pageNum,
+    };
+
+    if (cmd.getText) {
+      // Use cached text if available, otherwise extract on the fly
+      let text = pageTextCache.get(pageNum);
+      if (text == null && pdfDocument) {
+        try {
+          const pg = await pdfDocument.getPage(pageNum);
+          const tc = await pg.getTextContent();
+          text = (tc.items as Array<{ str?: string }>)
+            .map((item) => item.str || "")
+            .join(" ");
+          pageTextCache.set(pageNum, text);
+        } catch (err) {
+          log.error(
+            `get_pages: text extraction failed for page ${pageNum}:`,
+            err,
+          );
+          text = "";
+        }
+      }
+      entry.text = text ?? "";
+    }
+
+    if (cmd.getScreenshots) {
+      try {
+        entry.image = await renderPageOffscreen(pageNum);
+      } catch (err) {
+        log.error(`get_pages: screenshot failed for page ${pageNum}:`, err);
+      }
+    }
+
+    results.push(entry);
+  }
+
+  // Submit results back to server
+  try {
+    await app.callServerTool({
+      name: "submit_page_data",
+      arguments: { requestId: cmd.requestId, pages: results },
+    });
+    log.info(
+      `get_pages: submitted ${results.length} page(s) for ${cmd.requestId}`,
+    );
+  } catch (err) {
+    log.error("get_pages: failed to submit results:", err);
+  }
+}
+
+// =============================================================================
 // Annotation Persistence
 // =============================================================================
 
@@ -2269,6 +2393,13 @@ type PdfCommand =
   | {
       type: "fill_form";
       fields: Array<{ name: string; value: string | boolean }>;
+    }
+  | {
+      type: "get_pages";
+      requestId: string;
+      intervals: Array<{ start?: number; end?: number }>;
+      getText: boolean;
+      getScreenshots: boolean;
     };
 
 /**
@@ -2339,6 +2470,10 @@ function processCommands(commands: PdfCommand[]): void {
         for (const field of cmd.fields) {
           formFieldValues.set(field.name, field.value);
         }
+        break;
+      case "get_pages":
+        // Handle async — don't block other commands
+        handleGetPages(cmd);
         break;
     }
   }
