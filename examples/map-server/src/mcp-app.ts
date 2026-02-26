@@ -699,6 +699,7 @@ function handleDisplayModeChange(
 // Register handlers BEFORE connecting
 app.onteardown = async () => {
   log.info("App is being torn down");
+  stopPolling();
   if (viewer) {
     viewer.destroy();
     viewer = null;
@@ -780,59 +781,171 @@ app.ontoolinput = async (params) => {
   }
 };
 
-/*
-  Register tools for the model to interact w/ this component
-  Needs https://github.com/modelcontextprotocol/ext-apps/pull/72
-*/
-// app.registerTool(
-//   "navigate-to",
-//   {
-//     title: "Navigate To",
-//     description: "Navigate the globe to a new bounding box location",
-//     inputSchema: z.object({
-//       west: z.number().describe("Western longitude (-180 to 180)"),
-//       south: z.number().describe("Southern latitude (-90 to 90)"),
-//       east: z.number().describe("Eastern longitude (-180 to 180)"),
-//       north: z.number().describe("Northern latitude (-90 to 90)"),
-//       duration: z
-//         .number()
-//         .optional()
-//         .describe("Animation duration in seconds (default: 2)"),
-//       label: z.string().optional().describe("Optional label to display"),
-//     }),
-//   },
-//   async (args) => {
-//     if (!viewer) {
-//       return {
-//         content: [
-//           { type: "text" as const, text: "Error: Viewer not initialized" },
-//         ],
-//         isError: true,
-//       };
-//     }
+// =============================================================================
+// Command Queue Polling
+// =============================================================================
 
-//     const bbox: BoundingBox = {
-//       west: args.west,
-//       south: args.south,
-//       east: args.east,
-//       north: args.north,
-//     };
+type MapCommand =
+  | {
+      type: "navigate";
+      west: number;
+      south: number;
+      east: number;
+      north: number;
+      label?: string;
+      fly?: boolean;
+    }
+  | {
+      type: "add_marker";
+      latitude: number;
+      longitude: number;
+      label?: string;
+      color?: string;
+    };
 
-//     await flyToBoundingBox(viewer, bbox, args.duration ?? 2);
-//     setLabel(args.label);
+/**
+ * Fly camera to a bounding box with animation
+ */
+function flyToBoundingBox(
+  cesiumViewer: any,
+  bbox: BoundingBox,
+  duration: number = 2,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const { destination } = calculateDestination(bbox);
+    cesiumViewer.camera.flyTo({
+      destination,
+      orientation: {
+        heading: 0,
+        pitch: Cesium.Math.toRadians(-90),
+        roll: 0,
+      },
+      duration,
+      complete: resolve,
+      cancel: resolve,
+    });
+  });
+}
 
-//     return {
-//       content: [
-//         {
-//           type: "text" as const,
-//           text: `Navigated to: W:${bbox.west.toFixed(4)}, S:${bbox.south.toFixed(4)}, E:${bbox.east.toFixed(4)}, N:${bbox.north.toFixed(4)}${args.label ? ` (${args.label})` : ""}`,
-//         },
-//       ],
-//     };
-//   },
-// );
+/**
+ * Add a marker/pin entity to the globe
+ */
+function addMarker(
+  cesiumViewer: any,
+  lat: number,
+  lon: number,
+  label?: string,
+  color?: string,
+): void {
+  const position = Cesium.Cartesian3.fromDegrees(lon, lat);
+  const cssColor = color || "red";
 
-// Handle tool result - extract viewUUID and restore persisted view if available
+  // Parse CSS color to Cesium Color
+  let cesiumColor: any;
+  try {
+    cesiumColor = Cesium.Color.fromCssColorString(cssColor);
+  } catch {
+    cesiumColor = Cesium.Color.RED;
+  }
+
+  const entityOptions: any = {
+    position,
+    point: {
+      pixelSize: 12,
+      color: cesiumColor,
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 2,
+      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+    },
+  };
+
+  if (label) {
+    entityOptions.label = {
+      text: label,
+      font: "14px sans-serif",
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      outlineWidth: 2,
+      outlineColor: Cesium.Color.BLACK,
+      fillColor: Cesium.Color.WHITE,
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      pixelOffset: new Cesium.Cartesian2(0, -16),
+      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+    };
+  }
+
+  cesiumViewer.entities.add(entityOptions);
+  log.info("Added marker at", lat, lon, label || "");
+}
+
+/**
+ * Process a batch of commands from the server queue
+ */
+async function processCommands(commands: MapCommand[]): Promise<void> {
+  if (!viewer || commands.length === 0) return;
+
+  for (const cmd of commands) {
+    log.info("Processing command:", cmd.type, cmd);
+    switch (cmd.type) {
+      case "navigate": {
+        const bbox: BoundingBox = {
+          west: cmd.west,
+          south: cmd.south,
+          east: cmd.east,
+          north: cmd.north,
+        };
+        if (cmd.fly === false) {
+          setViewToBoundingBox(viewer, bbox);
+        } else {
+          await flyToBoundingBox(viewer, bbox);
+        }
+        break;
+      }
+      case "add_marker": {
+        addMarker(viewer, cmd.latitude, cmd.longitude, cmd.label, cmd.color);
+        break;
+      }
+    }
+  }
+}
+
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * Start polling for commands from the server queue
+ */
+function startPolling(): void {
+  if (pollTimer) return;
+  pollTimer = setInterval(async () => {
+    if (!viewUUID) return;
+    try {
+      const result = await app.callServerTool({
+        name: "poll_map_commands",
+        arguments: { viewUUID },
+      });
+      const commands =
+        (result.structuredContent as { commands?: MapCommand[] })?.commands ||
+        [];
+      if (commands.length > 0) {
+        log.info(`Received ${commands.length} command(s)`);
+        await processCommands(commands);
+      }
+    } catch (err) {
+      log.warn("Poll error:", err);
+    }
+  }, 300);
+}
+
+/**
+ * Stop polling for commands
+ */
+function stopPolling(): void {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+// Handle tool result - extract viewUUID, restore persisted view, start polling
 app.ontoolresult = async (result) => {
   viewUUID = result._meta?.viewUUID ? String(result._meta.viewUUID) : undefined;
   log.info("Tool result received, viewUUID:", viewUUID);
@@ -846,6 +959,11 @@ app.ontoolresult = async (result) => {
       await waitForTilesLoaded(viewer);
       hideLoading();
     }
+  }
+
+  // Start polling for commands now that we have viewUUID
+  if (viewUUID) {
+    startPolling();
   }
 };
 

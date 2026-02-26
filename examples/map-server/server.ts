@@ -27,6 +27,75 @@ const DIST_DIR = import.meta.filename.endsWith(".ts")
   : import.meta.dirname;
 const RESOURCE_URI = "ui://cesium-map/mcp-app.html";
 
+// =============================================================================
+// Command Queue (shared across stateless server instances)
+// =============================================================================
+
+/** Commands expire after this many ms if never polled */
+const COMMAND_TTL_MS = 60_000; // 60 seconds
+
+/** Periodic sweep interval to drop stale queues */
+const SWEEP_INTERVAL_MS = 30_000; // 30 seconds
+
+/** Fixed batch window: when commands are present, wait this long before returning to let more accumulate */
+const POLL_BATCH_WAIT_MS = 200;
+
+export type MapCommand =
+  | {
+      type: "navigate";
+      west: number;
+      south: number;
+      east: number;
+      north: number;
+      label?: string;
+      fly?: boolean;
+    }
+  | {
+      type: "add_marker";
+      latitude: number;
+      longitude: number;
+      label?: string;
+      color?: string;
+    };
+
+interface QueueEntry {
+  commands: MapCommand[];
+  /** Timestamp of the most recent enqueue or dequeue */
+  lastActivity: number;
+}
+
+const commandQueues = new Map<string, QueueEntry>();
+
+function pruneStaleQueues(): void {
+  const now = Date.now();
+  for (const [uuid, entry] of commandQueues) {
+    if (now - entry.lastActivity > COMMAND_TTL_MS) {
+      commandQueues.delete(uuid);
+    }
+  }
+}
+
+// Periodic sweep so abandoned queues don't leak
+setInterval(pruneStaleQueues, SWEEP_INTERVAL_MS).unref();
+
+function enqueueCommand(viewUUID: string, command: MapCommand): void {
+  let entry = commandQueues.get(viewUUID);
+  if (!entry) {
+    entry = { commands: [], lastActivity: Date.now() };
+    commandQueues.set(viewUUID, entry);
+  }
+  entry.commands.push(command);
+  entry.lastActivity = Date.now();
+}
+
+function dequeueCommands(viewUUID: string): MapCommand[] {
+  const entry = commandQueues.get(viewUUID);
+  if (!entry) return [];
+  const commands = entry.commands;
+  commandQueues.delete(viewUUID);
+  return commands;
+}
+
 // Nominatim API response type
 interface NominatimResult {
   place_id: number;
@@ -177,17 +246,172 @@ export function createServer(): McpServer {
       },
       _meta: { [RESOURCE_URI_META_KEY]: RESOURCE_URI },
     },
-    async ({ west, south, east, north, label }): Promise<CallToolResult> => ({
-      content: [
-        {
-          type: "text",
-          text: `Displaying globe at: W:${west.toFixed(4)}, S:${south.toFixed(4)}, E:${east.toFixed(4)}, N:${north.toFixed(4)}${label ? ` (${label})` : ""}`,
+    async ({ west, south, east, north, label }): Promise<CallToolResult> => {
+      const uuid = randomUUID();
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Displaying globe (viewUUID: ${uuid}) at: W:${west.toFixed(4)}, S:${south.toFixed(4)}, E:${east.toFixed(4)}, N:${north.toFixed(4)}${label ? ` (${label})` : ""}. Use the interact tool with this viewUUID to navigate, add markers, etc.`,
+          },
+        ],
+        _meta: {
+          viewUUID: uuid,
         },
-      ],
-      _meta: {
-        viewUUID: randomUUID(),
+      };
+    },
+  );
+
+  // interact tool - send actions to an existing map view
+  server.registerTool(
+    "interact",
+    {
+      title: "Interact with Map",
+      description: `Send an action to an existing map view. Actions are queued and batched.
+
+Actions:
+- navigate: Fly/jump to a bounding box. Requires \`west\`, \`south\`, \`east\`, \`north\`. Optional: \`fly\` (default true), \`label\`.
+- add_marker: Add a pin. Requires \`latitude\`, \`longitude\`. Optional: \`label\`, \`color\` (CSS color, default red).`,
+      inputSchema: {
+        viewUUID: z
+          .string()
+          .describe("The viewUUID of the map (from show-map result)"),
+        action: z
+          .enum(["navigate", "add_marker"])
+          .describe("Action to perform"),
+        west: z
+          .number()
+          .optional()
+          .describe("Western longitude, -180 to 180 (for navigate)"),
+        south: z
+          .number()
+          .optional()
+          .describe("Southern latitude, -90 to 90 (for navigate)"),
+        east: z
+          .number()
+          .optional()
+          .describe("Eastern longitude, -180 to 180 (for navigate)"),
+        north: z
+          .number()
+          .optional()
+          .describe("Northern latitude, -90 to 90 (for navigate)"),
+        fly: z
+          .boolean()
+          .optional()
+          .default(true)
+          .describe("Animate camera flight (for navigate, default true)"),
+        latitude: z
+          .number()
+          .optional()
+          .describe("Latitude, -90 to 90 (for add_marker)"),
+        longitude: z
+          .number()
+          .optional()
+          .describe("Longitude, -180 to 180 (for add_marker)"),
+        label: z
+          .string()
+          .optional()
+          .describe("Label text (for navigate or add_marker)"),
+        color: z
+          .string()
+          .optional()
+          .describe(
+            'Marker color as CSS color, e.g. "red", "#ff0000" (for add_marker)',
+          ),
       },
-    }),
+    },
+    async ({
+      viewUUID: uuid,
+      action,
+      west,
+      south,
+      east,
+      north,
+      fly,
+      latitude,
+      longitude,
+      label,
+      color,
+    }): Promise<CallToolResult> => {
+      let description: string;
+      switch (action) {
+        case "navigate":
+          if (west == null || south == null || east == null || north == null)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "navigate requires `west`, `south`, `east`, `north`",
+                },
+              ],
+              isError: true,
+            };
+          enqueueCommand(uuid, {
+            type: "navigate",
+            west,
+            south,
+            east,
+            north,
+            label,
+            fly,
+          });
+          description = `navigate to W:${west.toFixed(4)}, S:${south.toFixed(4)}, E:${east.toFixed(4)}, N:${north.toFixed(4)}${label ? ` (${label})` : ""}`;
+          break;
+        case "add_marker":
+          if (latitude == null || longitude == null)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "add_marker requires `latitude`, `longitude`",
+                },
+              ],
+              isError: true,
+            };
+          enqueueCommand(uuid, {
+            type: "add_marker",
+            latitude,
+            longitude,
+            label,
+            color,
+          });
+          description = `marker at ${latitude.toFixed(4)}, ${longitude.toFixed(4)}${label ? ` (${label})` : ""}`;
+          break;
+        default:
+          return {
+            content: [{ type: "text", text: `Unknown action: ${action}` }],
+            isError: true,
+          };
+      }
+      return {
+        content: [{ type: "text", text: `Queued: ${description}` }],
+      };
+    },
+  );
+
+  // poll_map_commands - app-only tool for polling pending commands
+  registerAppTool(
+    server,
+    "poll_map_commands",
+    {
+      title: "Poll Map Commands",
+      description: "Poll for pending commands for a map view",
+      inputSchema: {
+        viewUUID: z.string().describe("The viewUUID of the map"),
+      },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ viewUUID: uuid }): Promise<CallToolResult> => {
+      // If commands are queued, wait a fixed window to let more accumulate
+      if (commandQueues.has(uuid)) {
+        await new Promise((r) => setTimeout(r, POLL_BATCH_WAIT_MS));
+      }
+      const commands = dequeueCommands(uuid);
+      return {
+        content: [{ type: "text", text: `${commands.length} command(s)` }],
+        structuredContent: { commands },
+      };
+    },
   );
 
   // geocode tool - searches for places using Nominatim (no UI)
