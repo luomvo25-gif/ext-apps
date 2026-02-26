@@ -268,9 +268,6 @@ const commandQueues = new Map<string, QueueEntry>();
 /** Waiters for long-poll: resolve callback wakes up a blocked poll_pdf_commands */
 const pollWaiters = new Map<string, () => void>();
 
-/** Active viewer UUIDs — tracks UUIDs issued by display_pdf */
-const activeViewUUIDs = new Set<string>();
-
 /** Valid form field names per viewer UUID (populated during display_pdf) */
 const viewFieldNames = new Map<string, Set<string>>();
 
@@ -280,6 +277,12 @@ function pruneStaleQueues(): void {
     if (now - entry.lastActivity > COMMAND_TTL_MS) {
       commandQueues.delete(uuid);
       viewFieldNames.delete(uuid);
+    }
+  }
+  // Clean up empty queues with no active pollers
+  for (const [uuid, entry] of commandQueues) {
+    if (entry.commands.length === 0 && !pollWaiters.has(uuid)) {
+      commandQueues.delete(uuid);
     }
   }
 }
@@ -1020,8 +1023,6 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
       // Probe file size so the client can set up range transport without an extra fetch
       const { totalBytes } = await readPdfRange(normalized, 0, 1);
       const uuid = randomUUID();
-      activeViewUUIDs.add(uuid);
-
       // Extract form field schema (used for elicitation and field name validation)
       let formSchema: Awaited<ReturnType<typeof extractFormSchema>> = null;
       try {
@@ -1625,19 +1626,6 @@ Example — add annotations then screenshot to verify:
       intervals,
       commands,
     }): Promise<CallToolResult> => {
-      // Validate viewUUID — must be one issued by display_pdf
-      if (!activeViewUUIDs.has(uuid)) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Unknown viewUUID "${uuid}". Use the exact viewUUID returned by display_pdf (a UUID like "abc12345-...").`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
       // Build the list of commands to process
       const commandList: InteractCommand[] = commands
         ? commands

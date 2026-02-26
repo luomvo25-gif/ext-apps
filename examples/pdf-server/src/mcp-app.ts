@@ -817,10 +817,13 @@ async function updatePageContext() {
     const toolId = app.getHostContext()?.toolInfo?.id;
     const header = [
       `PDF viewer${toolId ? ` (${toolId})` : ""}`,
+      viewUUID ? `viewUUID: ${viewUUID}` : null,
       pdfTitle ? `"${pdfTitle}"` : pdfUrl,
       `Current Page: ${currentPage}/${totalPages}`,
       `Page size: ${pageWidthPt}×${pageHeightPt}pt (coordinates: origin at bottom-left, Y increases upward)`,
-    ].join(" | ");
+    ]
+      .filter(Boolean)
+      .join(" | ");
 
     // Include search status if active
     let searchSection = "";
