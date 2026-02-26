@@ -686,6 +686,27 @@ body {
   color: var(--text000);
 }
 
+.annotation-panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.annotation-panel-clear-all {
+  border: none;
+  background: transparent;
+  color: var(--text100);
+  cursor: pointer;
+  font-size: 0.7rem;
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+.annotation-panel-clear-all:hover {
+  color: #e74c3c;
+  background: var(--bg100);
+}
+
 .annotation-panel-close {
   display: flex;
   align-items: center;

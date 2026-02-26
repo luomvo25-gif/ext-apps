@@ -203,6 +203,9 @@ const annotationsPanelCountEl = document.getElementById(
 const annotationsPanelCloseBtn = document.getElementById(
   "annotation-panel-close",
 ) as HTMLButtonElement;
+const annotationsPanelClearAllBtn = document.getElementById(
+  "annotation-panel-clear-all",
+) as HTMLButtonElement;
 const annotationsBtn = document.getElementById(
   "annotations-btn",
 ) as HTMLButtonElement;
@@ -1664,6 +1667,7 @@ function initAnnotationPanel(): void {
   // Toggle button
   annotationsBtn.addEventListener("click", toggleAnnotationPanel);
   annotationsPanelCloseBtn.addEventListener("click", toggleAnnotationPanel);
+  annotationsPanelClearAllBtn.addEventListener("click", clearAllItems);
 
   // Strip navigation
   stripPrevBtn.addEventListener("click", () => {
