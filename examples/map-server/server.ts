@@ -458,17 +458,17 @@ Actions:
             };
           const addList = markers.map((m) => ({
             ...m,
-            id: m.id,
             latitude: m.latitude!,
             longitude: m.longitude!,
           }));
           enqueueCommand(uuid, { type: "add_markers", markers: addList });
-          description =
-            addList.length === 1
-              ? `marker "${addList[0].id}" at ${addList[0].latitude.toFixed(4)}, ${addList[0].longitude.toFixed(4)}${addList[0].label ? ` (${addList[0].label})` : ""}`
-              : `${addList.length} markers`;
           return {
-            content: [{ type: "text", text: `Added: ${description}` }],
+            content: [
+              {
+                type: "text",
+                text: `Added ${addList.length} marker(s)`,
+              },
+            ],
           };
         }
 
