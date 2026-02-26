@@ -325,9 +325,10 @@ export function createServer(): McpServer {
         id: randomUUID(),
       }));
 
+      const markerIds = initialMarkers.map((m) => m.id);
       const markerSummary =
         initialMarkers.length > 0
-          ? ` with ${initialMarkers.length} marker(s)`
+          ? ` with ${initialMarkers.length} marker(s) (ids: ${markerIds.join(", ")})`
           : "";
 
       return {
@@ -339,14 +340,8 @@ export function createServer(): McpServer {
         ],
         _meta: {
           viewUUID: uuid,
+          ...(initialMarkers.length > 0 ? { initialMarkers } : {}),
         },
-        structuredContent:
-          initialMarkers.length > 0
-            ? {
-                markerIds: initialMarkers.map((m) => m.id),
-                markers: initialMarkers,
-              }
-            : undefined,
       };
     },
   );
@@ -484,7 +479,6 @@ Actions:
               : `${withIds.length} markers (ids: ${idList.join(", ")})`;
           return {
             content: [{ type: "text", text: `Added: ${description}` }],
-            structuredContent: { markerIds: idList },
           };
         }
 

@@ -1222,15 +1222,19 @@ app.ontoolresult = async (result) => {
     }
   }
 
-  // Add initial markers from structuredContent (if any)
-  const sc = result.structuredContent as
-    | { markers?: (MarkerDef & { id: string })[] }
+  // Add initial markers from _meta (if any)
+  const initialMarkers = result._meta?.initialMarkers as
+    | (MarkerDef & { id: string })[]
     | undefined;
-  if (viewer && sc?.markers && sc.markers.length > 0) {
-    for (const m of sc.markers) {
+  if (viewer && initialMarkers && initialMarkers.length > 0) {
+    for (const m of initialMarkers) {
       addMarker(viewer, m.id, m.latitude, m.longitude, m.label, m.color);
     }
-    log.info("Added", sc.markers.length, "initial marker(s) from tool result");
+    log.info(
+      "Added",
+      initialMarkers.length,
+      "initial marker(s) from tool result",
+    );
   }
 
   // Start polling for commands now that we have viewUUID
