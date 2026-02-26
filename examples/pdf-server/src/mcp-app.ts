@@ -825,15 +825,29 @@ async function updatePageContext() {
       searchSection = `\nSearch: "${searchQuery}" (no matches found)`;
     }
 
-    // Include annotation summary if any exist
+    // Include annotation details if any exist
     let annotationSection = "";
     if (annotationMap.size > 0) {
       const onThisPage = [...annotationMap.values()].filter(
         (t) => t.def.page === currentPage,
-      ).length;
-      annotationSection = `\nAnnotations: ${onThisPage} on this page, ${annotationMap.size} total`;
+      );
+      annotationSection = `\nAnnotations: ${onThisPage.length} on this page, ${annotationMap.size} total`;
       if (formFieldValues.size > 0) {
         annotationSection += ` | ${formFieldValues.size} form field(s) filled`;
+      }
+      // List annotations on current page with their coordinates
+      if (onThisPage.length > 0) {
+        annotationSection +=
+          "\nAnnotations on this page (visible in screenshot):";
+        for (const t of onThisPage) {
+          const d = t.def;
+          if ("rects" in d && d.rects.length > 0) {
+            const r = d.rects[0];
+            annotationSection += `\n  [${d.id}] ${d.type} at (${r.x},${r.y}) ${r.width}x${r.height}`;
+          } else if ("x" in d && "y" in d) {
+            annotationSection += `\n  [${d.id}] ${d.type} at (${d.x},${d.y})`;
+          }
+        }
       }
     }
 
@@ -847,13 +861,13 @@ async function updatePageContext() {
       try {
         // Scale down to reduce token usage (tokens depend on dimensions)
         const sourceCanvas = canvasEl;
-        const scale = Math.min(
+        const screenshotScale = Math.min(
           1,
           MAX_MODEL_CONTEXT_UPDATE_IMAGE_DIMENSION /
             Math.max(sourceCanvas.width, sourceCanvas.height),
         );
-        const targetWidth = Math.round(sourceCanvas.width * scale);
-        const targetHeight = Math.round(sourceCanvas.height * scale);
+        const targetWidth = Math.round(sourceCanvas.width * screenshotScale);
+        const targetHeight = Math.round(sourceCanvas.height * screenshotScale);
 
         const tempCanvas = document.createElement("canvas");
         tempCanvas.width = targetWidth;
@@ -861,6 +875,14 @@ async function updatePageContext() {
         const ctx = tempCanvas.getContext("2d");
         if (ctx) {
           ctx.drawImage(sourceCanvas, 0, 0, targetWidth, targetHeight);
+          // Paint annotations on top so the model can see them
+          const dpr = window.devicePixelRatio || 1;
+          const screenshotVp = {
+            width: targetWidth,
+            height: targetHeight,
+            scale: scale * screenshotScale * dpr,
+          };
+          paintAnnotationsOnCanvas(ctx, currentPage, screenshotVp);
           const dataUrl = tempCanvas.toDataURL("image/png");
           const base64Data = dataUrl.split(",")[1];
           if (base64Data) {
@@ -913,6 +935,127 @@ function pdfPointToScreen(
 ): { left: number; top: number } {
   const s = viewport.scale;
   return { left: x * s, top: viewport.height - y * s };
+}
+
+/**
+ * Paint annotations for a page onto a 2D canvas context.
+ * Used to include annotations in screenshots sent to the model.
+ */
+function paintAnnotationsOnCanvas(
+  ctx: CanvasRenderingContext2D,
+  pageNum: number,
+  viewport: { width: number; height: number; scale: number },
+): void {
+  for (const tracked of annotationMap.values()) {
+    const def = tracked.def;
+    if (def.page !== pageNum) continue;
+
+    const color = getAnnotationColor(def);
+
+    switch (def.type) {
+      case "highlight":
+        ctx.save();
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = def.color || "rgba(255, 255, 0, 1)";
+        for (const rect of def.rects) {
+          const s = pdfRectToScreen(rect, viewport);
+          ctx.fillRect(s.left, s.top, s.width, s.height);
+        }
+        ctx.restore();
+        break;
+
+      case "underline":
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        for (const rect of def.rects) {
+          const s = pdfRectToScreen(rect, viewport);
+          ctx.beginPath();
+          ctx.moveTo(s.left, s.top + s.height);
+          ctx.lineTo(s.left + s.width, s.top + s.height);
+          ctx.stroke();
+        }
+        ctx.restore();
+        break;
+
+      case "strikethrough":
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        for (const rect of def.rects) {
+          const s = pdfRectToScreen(rect, viewport);
+          const midY = s.top + s.height / 2;
+          ctx.beginPath();
+          ctx.moveTo(s.left, midY);
+          ctx.lineTo(s.left + s.width, midY);
+          ctx.stroke();
+        }
+        ctx.restore();
+        break;
+
+      case "note": {
+        const pos = pdfPointToScreen(def.x, def.y, viewport);
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.8;
+        ctx.fillRect(pos.left, pos.top - 16, 16, 16);
+        ctx.restore();
+        break;
+      }
+
+      case "rectangle": {
+        const s = pdfRectToScreen(
+          { x: def.x, y: def.y, width: def.width, height: def.height },
+          viewport,
+        );
+        ctx.save();
+        if (def.fillColor) {
+          ctx.globalAlpha = 0.3;
+          ctx.fillStyle = def.fillColor;
+          ctx.fillRect(s.left, s.top, s.width, s.height);
+        }
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(s.left, s.top, s.width, s.height);
+        ctx.restore();
+        break;
+      }
+
+      case "freetext": {
+        const pos = pdfPointToScreen(def.x, def.y, viewport);
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.font = `${(def.fontSize || 12) * viewport.scale}px Helvetica, Arial, sans-serif`;
+        ctx.fillText(def.content, pos.left, pos.top);
+        ctx.restore();
+        break;
+      }
+
+      case "stamp": {
+        const pos = pdfPointToScreen(def.x, def.y, viewport);
+        ctx.save();
+        ctx.translate(pos.left, pos.top);
+        if (def.rotation) ctx.rotate((def.rotation * Math.PI) / 180);
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = 0.6;
+        ctx.font = `bold ${24 * viewport.scale}px Helvetica, Arial, sans-serif`;
+        const metrics = ctx.measureText(def.label);
+        const pad = 8 * viewport.scale;
+        ctx.strokeRect(
+          -pad,
+          -24 * viewport.scale - pad,
+          metrics.width + pad * 2,
+          24 * viewport.scale + pad * 2,
+        );
+        ctx.fillText(def.label, 0, 0);
+        ctx.restore();
+        break;
+      }
+    }
+  }
 }
 
 function renderAnnotationsForPage(pageNum: number): void {
@@ -1952,6 +2095,13 @@ async function renderPageOffscreen(pageNum: number): Promise<string> {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (page.render as any)({ canvasContext: ctx, viewport }).promise;
+
+  // Paint annotations on top so the model can see them
+  paintAnnotationsOnCanvas(ctx, pageNum, {
+    width: viewport.width,
+    height: viewport.height,
+    scale: renderScale,
+  });
 
   // Extract base64 (strip data URL prefix)
   const dataUrl = canvas.toDataURL("image/png");
