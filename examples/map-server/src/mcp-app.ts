@@ -785,6 +785,18 @@ app.ontoolinput = async (params) => {
 // Command Queue Polling
 // =============================================================================
 
+interface MarkerDef {
+  latitude: number;
+  longitude: number;
+  label?: string;
+  color?: string;
+}
+
+interface TrackedMarker extends MarkerDef {
+  id: string;
+  entity: any; // Cesium.Entity
+}
+
 type MapCommand =
   | {
       type: "navigate";
@@ -796,12 +808,31 @@ type MapCommand =
       fly?: boolean;
     }
   | {
-      type: "add_marker";
-      latitude: number;
-      longitude: number;
-      label?: string;
-      color?: string;
+      type: "add_markers";
+      markers: (MarkerDef & { id: string })[];
+    }
+  | {
+      type: "update_markers";
+      markers: {
+        id: string;
+        latitude?: number;
+        longitude?: number;
+        label?: string;
+        color?: string;
+      }[];
+    }
+  | {
+      type: "remove_markers";
+      ids: string[];
     };
+
+/** All markers added to the map, keyed by id */
+const markerMap = new Map<string, TrackedMarker>();
+
+/** Get markers as a flat array (for export) */
+function allMarkers(): TrackedMarker[] {
+  return Array.from(markerMap.values());
+}
 
 /**
  * Fly camera to a bounding box with animation
@@ -828,25 +859,50 @@ function flyToBoundingBox(
 }
 
 /**
- * Add a marker/pin entity to the globe
+ * Build Cesium label options for a marker
+ */
+function buildLabelOptions(text: string): any {
+  return {
+    text,
+    font: "bold 14px sans-serif",
+    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+    outlineWidth: 3,
+    outlineColor: Cesium.Color.BLACK,
+    fillColor: Cesium.Color.WHITE,
+    showBackground: true,
+    backgroundColor: new Cesium.Color(0, 0, 0, 0.65),
+    backgroundPadding: new Cesium.Cartesian2(6, 4),
+    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+    pixelOffset: new Cesium.Cartesian2(0, -16),
+    heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+  };
+}
+
+/**
+ * Parse a CSS color string to a Cesium Color
+ */
+function parseCesiumColor(cssColor: string): any {
+  try {
+    return Cesium.Color.fromCssColorString(cssColor);
+  } catch {
+    return Cesium.Color.RED;
+  }
+}
+
+/**
+ * Add a marker/pin entity to the globe and track it
  */
 function addMarker(
   cesiumViewer: any,
+  id: string,
   lat: number,
   lon: number,
   label?: string,
   color?: string,
 ): void {
   const position = Cesium.Cartesian3.fromDegrees(lon, lat);
-  const cssColor = color || "red";
-
-  // Parse CSS color to Cesium Color
-  let cesiumColor: any;
-  try {
-    cesiumColor = Cesium.Color.fromCssColorString(cssColor);
-  } catch {
-    cesiumColor = Cesium.Color.RED;
-  }
+  const cesiumColor = parseCesiumColor(color || "red");
 
   const entityOptions: any = {
     position,
@@ -860,25 +916,80 @@ function addMarker(
   };
 
   if (label) {
-    entityOptions.label = {
-      text: label,
-      font: "bold 14px sans-serif",
-      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-      outlineWidth: 3,
-      outlineColor: Cesium.Color.BLACK,
-      fillColor: Cesium.Color.WHITE,
-      showBackground: true,
-      backgroundColor: new Cesium.Color(0, 0, 0, 0.65),
-      backgroundPadding: new Cesium.Cartesian2(6, 4),
-      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-      pixelOffset: new Cesium.Cartesian2(0, -16),
-      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-      disableDepthTestDistance: Number.POSITIVE_INFINITY,
-    };
+    entityOptions.label = buildLabelOptions(label);
   }
 
-  cesiumViewer.entities.add(entityOptions);
-  log.info("Added marker at", lat, lon, label || "");
+  const entity = cesiumViewer.entities.add(entityOptions);
+  markerMap.set(id, {
+    id,
+    latitude: lat,
+    longitude: lon,
+    label,
+    color,
+    entity,
+  });
+  updateCopyButton();
+  log.info("Added marker", id, "at", lat, lon, label || "");
+}
+
+/**
+ * Update an existing marker's properties
+ */
+function updateMarker(
+  id: string,
+  updates: {
+    latitude?: number;
+    longitude?: number;
+    label?: string;
+    color?: string;
+  },
+): void {
+  const tracked = markerMap.get(id);
+  if (!tracked) {
+    log.warn("updateMarker: unknown id", id);
+    return;
+  }
+  const entity = tracked.entity;
+
+  if (updates.latitude != null || updates.longitude != null) {
+    const lat = updates.latitude ?? tracked.latitude;
+    const lon = updates.longitude ?? tracked.longitude;
+    entity.position = Cesium.Cartesian3.fromDegrees(lon, lat);
+    tracked.latitude = lat;
+    tracked.longitude = lon;
+  }
+
+  if (updates.color != null) {
+    entity.point.color = parseCesiumColor(updates.color);
+    tracked.color = updates.color;
+  }
+
+  if (updates.label !== undefined) {
+    if (updates.label) {
+      entity.label = buildLabelOptions(updates.label);
+    } else {
+      entity.label = undefined;
+    }
+    tracked.label = updates.label || undefined;
+  }
+
+  updateCopyButton();
+  log.info("Updated marker", id, updates);
+}
+
+/**
+ * Remove a marker from the globe
+ */
+function removeMarker(cesiumViewer: any, id: string): void {
+  const tracked = markerMap.get(id);
+  if (!tracked) {
+    log.warn("removeMarker: unknown id", id);
+    return;
+  }
+  cesiumViewer.entities.remove(tracked.entity);
+  markerMap.delete(id);
+  updateCopyButton();
+  log.info("Removed marker", id);
 }
 
 /**
@@ -904,8 +1015,22 @@ async function processCommands(commands: MapCommand[]): Promise<void> {
         }
         break;
       }
-      case "add_marker": {
-        addMarker(viewer, cmd.latitude, cmd.longitude, cmd.label, cmd.color);
+      case "add_markers": {
+        for (const m of cmd.markers) {
+          addMarker(viewer, m.id, m.latitude, m.longitude, m.label, m.color);
+        }
+        break;
+      }
+      case "update_markers": {
+        for (const m of cmd.markers) {
+          updateMarker(m.id, m);
+        }
+        break;
+      }
+      case "remove_markers": {
+        for (const id of cmd.ids) {
+          removeMarker(viewer, id);
+        }
         break;
       }
     }
@@ -947,6 +1072,110 @@ function stopPolling(): void {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+}
+
+// =============================================================================
+// Copy / Export Markers
+// =============================================================================
+
+/**
+ * Format markers as a Markdown table
+ */
+function markersToMarkdown(markers: TrackedMarker[]): string {
+  const lines = [
+    "| # | Label | Latitude | Longitude | Color |",
+    "| --- | --- | --- | --- | --- |",
+  ];
+  for (let i = 0; i < markers.length; i++) {
+    const m = markers[i];
+    lines.push(
+      `| ${i + 1} | ${m.label || ""} | ${m.latitude.toFixed(6)} | ${m.longitude.toFixed(6)} | ${m.color || "red"} |`,
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Format markers as GeoJSON FeatureCollection
+ */
+function markersToGeoJSON(markers: TrackedMarker[]): string {
+  const features = markers.map((m, i) => ({
+    type: "Feature" as const,
+    properties: {
+      name: m.label || `Marker ${i + 1}`,
+      "marker-color": m.color || "red",
+    },
+    geometry: {
+      type: "Point" as const,
+      coordinates: [m.longitude, m.latitude],
+    },
+  }));
+  return JSON.stringify({ type: "FeatureCollection", features }, null, 2);
+}
+
+/**
+ * Copy markers to clipboard in multiple formats (Markdown + GeoJSON)
+ */
+async function copyMarkers(): Promise<void> {
+  const markers = allMarkers();
+  if (markers.length === 0) return;
+
+  const md = markersToMarkdown(markers);
+  const geojson = markersToGeoJSON(markers);
+  const btn = document.getElementById("copy-btn");
+
+  try {
+    // Multi-mime clipboard: text/plain gets Markdown, application/geo+json gets GeoJSON
+    // Browsers only support a subset of MIME types in ClipboardItem, so we use text/plain for
+    // the markdown table and text/html for a code block with GeoJSON
+    const htmlContent = `<table>\n<tr><th>#</th><th>Label</th><th>Lat</th><th>Lon</th><th>Color</th></tr>\n${markers
+      .map(
+        (m, i) =>
+          `<tr><td>${i + 1}</td><td>${m.label || ""}</td><td>${m.latitude.toFixed(6)}</td><td>${m.longitude.toFixed(6)}</td><td>${m.color || "red"}</td></tr>`,
+      )
+      .join(
+        "\n",
+      )}\n</table>\n<details><summary>GeoJSON</summary><pre><code>${geojson.replace(/</g, "&lt;")}</code></pre></details>`;
+
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        "text/plain": new Blob([`${md}\n\n\`\`\`geojson\n${geojson}\n\`\`\``], {
+          type: "text/plain",
+        }),
+        "text/html": new Blob([htmlContent], { type: "text/html" }),
+      }),
+    ]);
+
+    if (btn) {
+      btn.classList.add("copied");
+      setTimeout(() => btn.classList.remove("copied"), 1200);
+    }
+    log.info(`Copied ${markers.length} marker(s) to clipboard`);
+  } catch (e) {
+    // Fallback: plain text only
+    try {
+      await navigator.clipboard.writeText(
+        `${md}\n\n\`\`\`geojson\n${geojson}\n\`\`\``,
+      );
+      if (btn) {
+        btn.classList.add("copied");
+        setTimeout(() => btn.classList.remove("copied"), 1200);
+      }
+    } catch (e2) {
+      log.error("Failed to copy markers:", e2);
+    }
+  }
+}
+
+/**
+ * Show/hide the copy button based on marker count
+ */
+function updateCopyButton(): void {
+  const btn = document.getElementById("copy-btn");
+  if (!btn) return;
+  const count = markerMap.size;
+  btn.style.display = count > 0 ? "flex" : "none";
+  btn.title = `Copy ${count} marker(s) as Markdown + GeoJSON`;
 }
 
 // Handle tool result - extract viewUUID, restore persisted view, start polling
@@ -1010,6 +1239,13 @@ async function initialize() {
 
     // Set up keyboard shortcuts for fullscreen (Escape to exit, Ctrl/Cmd+Enter to toggle)
     document.addEventListener("keydown", handleFullscreenKeyboard);
+
+    // Set up copy button
+    const copyBtn = document.getElementById("copy-btn");
+    if (copyBtn) {
+      copyBtn.addEventListener("click", copyMarkers);
+    }
+    updateCopyButton();
 
     // Wait a bit for tool input, then try restoring persisted view or show default
     setTimeout(async () => {

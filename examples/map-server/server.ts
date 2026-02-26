@@ -40,6 +40,13 @@ const SWEEP_INTERVAL_MS = 30_000; // 30 seconds
 /** Fixed batch window: when commands are present, wait this long before returning to let more accumulate */
 const POLL_BATCH_WAIT_MS = 200;
 
+export interface MarkerDef {
+  latitude: number;
+  longitude: number;
+  label?: string;
+  color?: string;
+}
+
 export type MapCommand =
   | {
       type: "navigate";
@@ -51,11 +58,22 @@ export type MapCommand =
       fly?: boolean;
     }
   | {
-      type: "add_marker";
-      latitude: number;
-      longitude: number;
-      label?: string;
-      color?: string;
+      type: "add_markers";
+      markers: (MarkerDef & { id: string })[];
+    }
+  | {
+      type: "update_markers";
+      markers: {
+        id: string;
+        latitude?: number;
+        longitude?: number;
+        label?: string;
+        color?: string;
+      }[];
+    }
+  | {
+      type: "remove_markers";
+      ids: string[];
     };
 
 interface QueueEntry {
@@ -271,13 +289,15 @@ export function createServer(): McpServer {
 
 Actions:
 - navigate: Fly/jump to a bounding box. Requires \`west\`, \`south\`, \`east\`, \`north\`. Optional: \`fly\` (default true), \`label\`.
-- add_marker: Add a pin. Requires \`latitude\`, \`longitude\`. Optional: \`label\`, \`color\` (CSS color, default red).`,
+- add_markers: Add one or more pins. Requires \`markers\` array, each with \`latitude\`, \`longitude\`, and optional \`label\`, \`color\` (CSS color, default red). Returns the assigned marker \`ids\`.
+- update_markers: Update existing markers. Requires \`markers\` array, each with \`id\` and any fields to change (\`latitude\`, \`longitude\`, \`label\`, \`color\`).
+- remove_markers: Remove markers by id. Requires \`ids\` array.`,
       inputSchema: {
         viewUUID: z
           .string()
           .describe("The viewUUID of the map (from show-map result)"),
         action: z
-          .enum(["navigate", "add_marker"])
+          .enum(["navigate", "add_markers", "update_markers", "remove_markers"])
           .describe("Action to perform"),
         west: z
           .number()
@@ -300,24 +320,32 @@ Actions:
           .optional()
           .default(true)
           .describe("Animate camera flight (for navigate, default true)"),
-        latitude: z
-          .number()
+        label: z.string().optional().describe("Label text (for navigate)"),
+        markers: z
+          .array(
+            z.object({
+              id: z
+                .string()
+                .optional()
+                .describe("Marker id (required for update_markers)"),
+              latitude: z.number().optional().describe("Latitude, -90 to 90"),
+              longitude: z
+                .number()
+                .optional()
+                .describe("Longitude, -180 to 180"),
+              label: z.string().optional().describe("Marker label"),
+              color: z
+                .string()
+                .optional()
+                .describe('CSS color, e.g. "red", "#ff0000"'),
+            }),
+          )
           .optional()
-          .describe("Latitude, -90 to 90 (for add_marker)"),
-        longitude: z
-          .number()
+          .describe("Array of markers (for add_markers, update_markers)"),
+        ids: z
+          .array(z.string())
           .optional()
-          .describe("Longitude, -180 to 180 (for add_marker)"),
-        label: z
-          .string()
-          .optional()
-          .describe("Label text (for navigate or add_marker)"),
-        color: z
-          .string()
-          .optional()
-          .describe(
-            'Marker color as CSS color, e.g. "red", "#ff0000" (for add_marker)',
-          ),
+          .describe("Marker ids to remove (for remove_markers)"),
       },
     },
     async ({
@@ -328,10 +356,9 @@ Actions:
       east,
       north,
       fly,
-      latitude,
-      longitude,
       label,
-      color,
+      markers,
+      ids,
     }): Promise<CallToolResult> => {
       let description: string;
       switch (action) {
@@ -356,36 +383,106 @@ Actions:
             fly,
           });
           description = `navigate to W:${west.toFixed(4)}, S:${south.toFixed(4)}, E:${east.toFixed(4)}, N:${north.toFixed(4)}${label ? ` (${label})` : ""}`;
-          break;
-        case "add_marker":
-          if (latitude == null || longitude == null)
+          return {
+            content: [{ type: "text", text: `Queued: ${description}` }],
+          };
+
+        case "add_markers": {
+          if (!markers || markers.length === 0)
             return {
               content: [
                 {
                   type: "text",
-                  text: "add_marker requires `latitude`, `longitude`",
+                  text: "add_markers requires a non-empty `markers` array",
+                },
+              ],
+              isError: true,
+            };
+          // Assign UUIDs to each marker
+          const withIds = markers.map((m) => ({
+            ...m,
+            id: m.id || randomUUID(),
+            latitude: m.latitude!,
+            longitude: m.longitude!,
+          }));
+          enqueueCommand(uuid, { type: "add_markers", markers: withIds });
+          const idList = withIds.map((m) => m.id);
+          description =
+            withIds.length === 1
+              ? `marker ${idList[0]} at ${withIds[0].latitude.toFixed(4)}, ${withIds[0].longitude.toFixed(4)}${withIds[0].label ? ` (${withIds[0].label})` : ""}`
+              : `${withIds.length} markers (ids: ${idList.join(", ")})`;
+          return {
+            content: [{ type: "text", text: `Added: ${description}` }],
+            structuredContent: { markerIds: idList },
+          };
+        }
+
+        case "update_markers": {
+          if (!markers || markers.length === 0)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "update_markers requires a non-empty `markers` array with `id` on each entry",
+                },
+              ],
+              isError: true,
+            };
+          const updates = markers.filter((m) => m.id);
+          if (updates.length === 0)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "Each marker in `markers` must have an `id`",
                 },
               ],
               isError: true,
             };
           enqueueCommand(uuid, {
-            type: "add_marker",
-            latitude,
-            longitude,
-            label,
-            color,
+            type: "update_markers",
+            markers: updates as {
+              id: string;
+              latitude?: number;
+              longitude?: number;
+              label?: string;
+              color?: string;
+            }[],
           });
-          description = `marker at ${latitude.toFixed(4)}, ${longitude.toFixed(4)}${label ? ` (${label})` : ""}`;
-          break;
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Queued: update ${updates.length} marker(s)`,
+              },
+            ],
+          };
+        }
+
+        case "remove_markers":
+          if (!ids || ids.length === 0)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "remove_markers requires a non-empty `ids` array",
+                },
+              ],
+              isError: true,
+            };
+          enqueueCommand(uuid, { type: "remove_markers", ids });
+          return {
+            content: [
+              { type: "text", text: `Queued: remove ${ids.length} marker(s)` },
+            ],
+          };
+
         default:
           return {
             content: [{ type: "text", text: `Unknown action: ${action}` }],
             isError: true,
           };
       }
-      return {
-        content: [{ type: "text", text: `Queued: ${description}` }],
-      };
     },
   );
 
