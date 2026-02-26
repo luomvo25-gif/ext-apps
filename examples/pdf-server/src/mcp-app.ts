@@ -3116,7 +3116,9 @@ app.ontoolresult = async (result: CallToolResult) => {
     loadingIndicatorEl.style.display = "none";
 
     showViewer();
-    downloadBtn.style.display = "";
+    downloadBtn.style.display = app.getHostCapabilities()?.downloadFile
+      ? ""
+      : "none";
     // Restore any persisted annotations
     restoreAnnotations();
 
