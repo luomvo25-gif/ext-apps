@@ -247,6 +247,9 @@ interface QueueEntry {
 
 const commandQueues = new Map<string, QueueEntry>();
 
+/** Active viewer UUIDs — tracks UUIDs issued by display_pdf */
+const activeViewUUIDs = new Set<string>();
+
 function pruneStaleQueues(): void {
   const now = Date.now();
   for (const [uuid, entry] of commandQueues) {
@@ -839,6 +842,7 @@ Accepts:
       // Probe file size so the client can set up range transport without an extra fetch
       const { totalBytes } = await readPdfRange(normalized, 0, 1);
       const uuid = randomUUID();
+      activeViewUUIDs.add(uuid);
 
       return {
         content: [
@@ -865,6 +869,7 @@ Accepts:
     {
       title: "Interact with PDF",
       description: `Interact with a PDF viewer: annotate, navigate, search, extract pages, fill forms.
+IMPORTANT: viewUUID must be the exact UUID returned by display_pdf (e.g. "a1b2c3d4-..."). Do NOT use arbitrary strings.
 
 **ANNOTATION** — You can add visual annotations to any page. Use add_annotations with an array of annotation objects.
 Each annotation needs: id (unique string), type, page (1-indexed).
@@ -999,6 +1004,18 @@ Example — add a highlight and a stamp on page 1:
       getText,
       getScreenshots,
     }): Promise<CallToolResult> => {
+      // Validate viewUUID — must be one issued by display_pdf
+      if (!activeViewUUIDs.has(uuid)) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Unknown viewUUID "${uuid}". Use the exact viewUUID returned by display_pdf (a UUID like "abc12345-...").`,
+            },
+          ],
+          isError: true,
+        };
+      }
       let description: string;
       switch (action) {
         case "navigate":
