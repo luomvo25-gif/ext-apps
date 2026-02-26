@@ -1047,7 +1047,6 @@ function addMarker(
     labelEntity,
   });
   updateCopyButton();
-  persistMarkers();
   log.info("Added marker", id, "at", lat, lon, label || "");
 }
 
@@ -1114,7 +1113,6 @@ function updateMarker(
   }
 
   updateCopyButton();
-  persistMarkers();
   log.info("Updated marker", id, updates);
 }
 
@@ -1131,7 +1129,6 @@ function removeMarker(cesiumViewer: any, id: string): void {
   if (tracked.labelEntity) cesiumViewer.entities.remove(tracked.labelEntity);
   markerMap.delete(id);
   updateCopyButton();
-  persistMarkers();
   log.info("Removed marker", id);
 }
 
@@ -1178,6 +1175,8 @@ async function processCommands(commands: MapCommand[]): Promise<void> {
       }
     }
   }
+  // Persist once after the entire batch
+  persistMarkers();
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
