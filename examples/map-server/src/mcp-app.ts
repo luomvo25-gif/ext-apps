@@ -1498,15 +1498,55 @@ function updateCopyButton(): void {
 // Tool Input Handlers
 // =============================================================================
 
+// Track whether we've already positioned the camera from streaming
+let hasPositionedFromPartial = false;
+
 // Handle streaming tool input (progressive annotation rendering)
 app.ontoolinputpartial = (params) => {
   if (!viewer) return;
   const args = params.arguments as
-    | { annotations?: AnnotationDef[] }
+    | {
+        west?: number;
+        south?: number;
+        east?: number;
+        north?: number;
+        latitude?: number;
+        longitude?: number;
+        radiusKm?: number;
+        annotations?: AnnotationDef[];
+      }
     | undefined;
-  if (!args?.annotations || args.annotations.length === 0) return;
+  if (!args) return;
 
-  // Process all but the last item (which may be truncated from streaming)
+  // Position camera as soon as bbox/center fields are available (once)
+  if (!hasPositionedFromPartial) {
+    let bbox: BoundingBox | null = null;
+    if (
+      args.west != null &&
+      args.south != null &&
+      args.east != null &&
+      args.north != null
+    ) {
+      bbox = {
+        west: args.west,
+        south: args.south,
+        east: args.east,
+        north: args.north,
+      };
+    } else if (args.latitude != null && args.longitude != null) {
+      bbox = bboxFromCenter(args.latitude, args.longitude, args.radiusKm ?? 50);
+    }
+    if (bbox) {
+      hasPositionedFromPartial = true;
+      hasReceivedToolInput = true;
+      setViewToBoundingBox(viewer, bbox);
+      hideLoading();
+      log.info("Positioned camera from streaming partial");
+    }
+  }
+
+  // Process annotations (all but last which may be truncated)
+  if (!args.annotations || args.annotations.length === 0) return;
   const safe = args.annotations.slice(0, -1);
   for (const ann of safe) {
     if (!ann.id || !ann.type) continue;
