@@ -967,21 +967,18 @@ export function createServer(): McpServer {
       title: "Display PDF",
       description: `Display an interactive PDF viewer for reading, annotating, and filling out PDF documents.
 
-Use this tool when the user wants to:
-- View or read a PDF document
-- Fill out a PDF form (e.g. tax forms, applications, contracts)
-- Annotate a PDF (highlight, underline, add notes, stamps, etc.)
-- Review or interact with a PDF document
+Use this tool when the user wants to view, read, annotate, or fill out a PDF.
 
-**CRITICAL — DO NOT call display_pdf to add annotations, highlights, stamps, rectangles, or any other modifications to an already-displayed PDF.** If you already have a viewUUID from a previous display_pdf call, you MUST use the \`interact\` tool instead (e.g. \`interact\` with action \`add_annotations\`, \`highlight_text\`, \`fill_form\`, etc.). Calling display_pdf again discards the existing viewer and all its state. Only call display_pdf if the user asks to open a DIFFERENT PDF or explicitly requests a fresh/new view.
+**CRITICAL — DO NOT call display_pdf again on an already-displayed PDF.** Use the \`interact\` tool with the viewUUID from the result instead. Calling display_pdf again discards the existing viewer and all its state.
 
-Accepts:
-- Local files explicitly added to the server (use list_pdfs to see available files)
-- Local files under directories provided by the client as MCP roots
-- Any remote PDF accessible via HTTPS
+Returns a viewUUID in structuredContent. Use it with \`interact\` for follow-up actions:
+- navigate, search, find, search_navigate, zoom
+- add_annotations, update_annotations, remove_annotations, highlight_text
+- fill_form (fill PDF form fields)
+- get_text, get_screenshot (extract content)
 
-If the PDF contains form fields, users can fill them interactively in the viewer, or the model can fill them programmatically via the \`interact\` tool's \`fill_form\` action.
-Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before the PDF is displayed.`,
+Accepts local files (use list_pdfs), client MCP root directories, or any HTTPS URL.
+Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before display.`,
       inputSchema: {
         url: z
           .string()
@@ -1069,7 +1066,7 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
       const contentParts: Array<{ type: "text"; text: string }> = [
         {
           type: "text",
-          text: `Displaying PDF (viewUUID: ${uuid}): ${normalized}.\n\nUse the \`interact\` tool with this viewUUID. Available actions:\n- navigate: go to a page\n- search / find: search text (search highlights in UI, find is silent)\n- search_navigate: jump to a search match by index\n- zoom: set zoom level (0.5–3.0)\n- add_annotations: add highlights, underlines, strikethroughs, notes, rectangles, freetext, stamps (APPROVED/DRAFT/CONFIDENTIAL/FINAL/VOID/REJECTED)\n- update_annotations: partially update existing annotations\n- remove_annotations: remove annotations by ID\n- highlight_text: find text by query and highlight it automatically\n- fill_form: fill PDF form fields\n- get_pages: extract text and/or screenshots from page ranges without navigating`,
+          text: `Displaying PDF: ${normalized} (viewUUID: ${uuid})`,
         },
       ];
 
