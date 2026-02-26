@@ -872,16 +872,29 @@ Actions:
 - find: Search text silently (no UI change). Requires \`query\`. Results appear in model context only.
 - search_navigate: Jump to a search match. Requires \`matchIndex\` (from search/find results).
 - zoom: Set zoom level. Requires \`scale\` (0.5–3.0).
-- add_annotations: Add annotations to the PDF. Requires \`annotations\` array.
-- update_annotations: Partially update existing annotations. Requires \`annotations\` array (id + type required).
+- add_annotations: Add annotations to the PDF. Requires \`annotations\` array. Each annotation has \`id\` (string), \`type\`, and \`page\` (1-indexed).
+- update_annotations: Partially update existing annotations. Requires \`annotations\` array (id + type required, other fields optional).
 - remove_annotations: Remove annotations by ID. Requires \`ids\` array.
-- highlight_text: Find text and highlight it. Requires \`query\`. Optional \`page\`, \`color\`, \`content\`.
+- highlight_text: Find text and highlight it. Requires \`query\`. Optional \`page\` (defaults to all pages), \`color\`, \`content\` (tooltip).
 - fill_form: Fill form fields. Requires \`fields\` array of { name, value }.
 - get_pages: Get text and/or screenshots from pages without navigating. Uses \`intervals\` (page ranges with optional start/end, e.g. [{start:1,end:5}], [{}] for all). Optional \`getText\` (default true), \`getScreenshots\` (default false). Max 20 pages. Returns page content directly.
 
-Annotation types: highlight, underline, strikethrough, note, rectangle, freetext, stamp.
-Coordinates are in PDF points (72 dpi), bottom-left origin. Colors are CSS strings (e.g. "#ff0000", "rgba(255,0,0,0.5)").
-Stamp labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED.`,
+Annotation types (all use PDF points, 72 dpi, bottom-left origin; colors are CSS strings):
+- highlight: \`{id, type:"highlight", page, rects:[{x,y,width,height}], color?, content?}\` — yellow semi-transparent overlay
+- underline: \`{id, type:"underline", page, rects:[{x,y,width,height}], color?}\` — red underline
+- strikethrough: \`{id, type:"strikethrough", page, rects:[{x,y,width,height}], color?}\` — line through text
+- note: \`{id, type:"note", page, x, y, content, color?}\` — sticky note icon with tooltip
+- rectangle: \`{id, type:"rectangle", page, x, y, width, height, color?, fillColor?}\` — box outline/fill
+- freetext: \`{id, type:"freetext", page, x, y, content, fontSize?, color?}\` — text at position
+- stamp: \`{id, type:"stamp", page, x, y, label, color?, rotation?}\` — label is one of: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED
+
+Example — add a highlight and a stamp:
+\`\`\`json
+{"action":"add_annotations","viewUUID":"...","annotations":[
+  {"id":"h1","type":"highlight","page":1,"rects":[{"x":72,"y":700,"width":200,"height":12}],"color":"rgba(255,255,0,0.5)"},
+  {"id":"s1","type":"stamp","page":1,"x":300,"y":500,"label":"APPROVED","color":"#00aa00","rotation":-15}
+]}
+\`\`\``,
       inputSchema: {
         viewUUID: z
           .string()
@@ -922,10 +935,31 @@ Stamp labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED.`,
           .optional()
           .describe("Zoom scale, 1.0 = 100% (for zoom)"),
         annotations: z
-          .array(z.record(z.string(), z.unknown()))
+          .array(
+            z.union([
+              HighlightAnnotation,
+              UnderlineAnnotation,
+              StrikethroughAnnotation,
+              NoteAnnotation,
+              RectangleAnnotation,
+              FreetextAnnotation,
+              StampAnnotation,
+              // Partial forms for update_annotations (id + type required)
+              HighlightAnnotation.partial().required({ id: true, type: true }),
+              UnderlineAnnotation.partial().required({ id: true, type: true }),
+              StrikethroughAnnotation.partial().required({
+                id: true,
+                type: true,
+              }),
+              NoteAnnotation.partial().required({ id: true, type: true }),
+              RectangleAnnotation.partial().required({ id: true, type: true }),
+              FreetextAnnotation.partial().required({ id: true, type: true }),
+              StampAnnotation.partial().required({ id: true, type: true }),
+            ]),
+          )
           .optional()
           .describe(
-            "Annotation definitions (for add_annotations) or partial updates (for update_annotations)",
+            "Annotation objects for add_annotations (full) or update_annotations (partial, id+type required).",
           ),
         ids: z
           .array(z.string())
@@ -1031,7 +1065,7 @@ Stamp labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED.`,
           enqueueCommand(uuid, { type: "zoom", scale });
           description = `zoom to ${Math.round(scale * 100)}%`;
           break;
-        case "add_annotations": {
+        case "add_annotations":
           if (!annotations || annotations.length === 0)
             return {
               content: [
@@ -1042,31 +1076,14 @@ Stamp labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED.`,
               ],
               isError: true,
             };
-          // Validate each annotation
-          const parsed = [];
-          for (const raw of annotations) {
-            const result = PdfAnnotationDef.safeParse(raw);
-            if (!result.success) {
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: `Invalid annotation: ${result.error.message}`,
-                  },
-                ],
-                isError: true,
-              };
-            }
-            parsed.push(result.data);
-          }
+          // annotations are already validated by Zod inputSchema
           enqueueCommand(uuid, {
             type: "add_annotations",
-            annotations: parsed,
+            annotations: annotations as z.infer<typeof PdfAnnotationDef>[],
           });
-          description = `add ${parsed.length} annotation(s)`;
+          description = `add ${annotations.length} annotation(s)`;
           break;
-        }
-        case "update_annotations": {
+        case "update_annotations":
           if (!annotations || annotations.length === 0)
             return {
               content: [
@@ -1077,29 +1094,12 @@ Stamp labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED.`,
               ],
               isError: true,
             };
-          const parsedUpdates = [];
-          for (const raw of annotations) {
-            const result = PdfAnnotationUpdate.safeParse(raw);
-            if (!result.success) {
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: `Invalid annotation update: ${result.error.message}`,
-                  },
-                ],
-                isError: true,
-              };
-            }
-            parsedUpdates.push(result.data);
-          }
           enqueueCommand(uuid, {
             type: "update_annotations",
-            annotations: parsedUpdates,
+            annotations: annotations as z.infer<typeof PdfAnnotationUpdate>[],
           });
-          description = `update ${parsedUpdates.length} annotation(s)`;
+          description = `update ${annotations.length} annotation(s)`;
           break;
-        }
         case "remove_annotations":
           if (!ids || ids.length === 0)
             return {
