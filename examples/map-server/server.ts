@@ -228,54 +228,125 @@ export function createServer(): McpServer {
   );
 
   // show-map tool - displays the CesiumJS globe
-  // Default bounding box: London area
   registerAppTool(
     server,
     "show-map",
     {
       title: "Show Map",
       description:
-        "Display an interactive world map zoomed to a specific bounding box. Use the GeoCode tool to find the bounding box of a location.",
+        "Display an interactive world map. Specify the view with either a bounding box (`west`/`south`/`east`/`north`) or a center point (`latitude`/`longitude`) with optional `radiusKm` (default 50). Optionally pass initial `markers`.",
       inputSchema: {
         west: z
           .number()
           .optional()
-          .default(-0.5)
-          .describe("Western longitude (-180 to 180)"),
+          .describe("Western longitude (-180 to 180) — bounding box mode"),
         south: z
           .number()
           .optional()
-          .default(51.3)
-          .describe("Southern latitude (-90 to 90)"),
+          .describe("Southern latitude (-90 to 90) — bounding box mode"),
         east: z
           .number()
           .optional()
-          .default(0.3)
-          .describe("Eastern longitude (-180 to 180)"),
+          .describe("Eastern longitude (-180 to 180) — bounding box mode"),
         north: z
           .number()
           .optional()
-          .default(51.7)
-          .describe("Northern latitude (-90 to 90)"),
+          .describe("Northern latitude (-90 to 90) — bounding box mode"),
+        latitude: z
+          .number()
+          .optional()
+          .describe("Center latitude (-90 to 90) — center+radius mode"),
+        longitude: z
+          .number()
+          .optional()
+          .describe("Center longitude (-180 to 180) — center+radius mode"),
+        radiusKm: z
+          .number()
+          .optional()
+          .default(50)
+          .describe("Radius in km around center point (default 50)"),
         label: z
           .string()
           .optional()
           .describe("Optional label to display on the map"),
+        markers: z
+          .array(
+            z.object({
+              latitude: z.number().describe("Latitude, -90 to 90"),
+              longitude: z.number().describe("Longitude, -180 to 180"),
+              label: z.string().optional().describe("Marker label"),
+              color: z
+                .string()
+                .optional()
+                .describe('CSS color, e.g. "red", "#ff0000"'),
+            }),
+          )
+          .optional()
+          .describe("Initial markers to display on the map"),
       },
       _meta: { [RESOURCE_URI_META_KEY]: RESOURCE_URI },
     },
-    async ({ west, south, east, north, label }): Promise<CallToolResult> => {
+    async ({
+      west,
+      south,
+      east,
+      north,
+      latitude,
+      longitude,
+      radiusKm,
+      label,
+      markers,
+    }): Promise<CallToolResult> => {
       const uuid = randomUUID();
+
+      // Resolve bounding box: either explicit or computed from center+radius
+      let bbox: { west: number; south: number; east: number; north: number };
+      if (west != null && south != null && east != null && north != null) {
+        bbox = { west, south, east, north };
+      } else if (latitude != null && longitude != null) {
+        // ~111 km per degree of latitude
+        const latDelta = (radiusKm ?? 50) / 111;
+        const lonDelta =
+          (radiusKm ?? 50) / (111 * Math.cos((latitude * Math.PI) / 180));
+        bbox = {
+          west: longitude - lonDelta,
+          south: latitude - latDelta,
+          east: longitude + lonDelta,
+          north: latitude + latDelta,
+        };
+      } else {
+        // Default: London area
+        bbox = { west: -0.5, south: 51.3, east: 0.3, north: 51.7 };
+      }
+
+      // Assign IDs to initial markers (so they can be updated/removed later)
+      const initialMarkers = (markers ?? []).map((m) => ({
+        ...m,
+        id: randomUUID(),
+      }));
+
+      const markerSummary =
+        initialMarkers.length > 0
+          ? ` with ${initialMarkers.length} marker(s)`
+          : "";
+
       return {
         content: [
           {
             type: "text",
-            text: `Displaying globe (viewUUID: ${uuid}) at: W:${west.toFixed(4)}, S:${south.toFixed(4)}, E:${east.toFixed(4)}, N:${north.toFixed(4)}${label ? ` (${label})` : ""}. Use the interact tool with this viewUUID to navigate, add markers, etc.`,
+            text: `Displaying globe (viewUUID: ${uuid}) at: W:${bbox.west.toFixed(4)}, S:${bbox.south.toFixed(4)}, E:${bbox.east.toFixed(4)}, N:${bbox.north.toFixed(4)}${label ? ` (${label})` : ""}${markerSummary}. Use the interact tool with this viewUUID to navigate, add markers, etc.`,
           },
         ],
         _meta: {
           viewUUID: uuid,
         },
+        structuredContent:
+          initialMarkers.length > 0
+            ? {
+                markerIds: initialMarkers.map((m) => m.id),
+                markers: initialMarkers,
+              }
+            : undefined,
       };
     },
   );
@@ -517,62 +588,56 @@ Actions:
     {
       title: "Geocode",
       description:
-        "Search for places using OpenStreetMap. Returns coordinates and bounding boxes for up to 5 matches.",
+        "Search for places using OpenStreetMap. Accepts one or more queries. Returns coordinates and bounding boxes (top result per query).",
       inputSchema: {
-        query: z
-          .string()
+        queries: z
+          .array(z.string())
           .describe(
-            "Place name or address to search for (e.g., 'Paris', 'Golden Gate Bridge', '1600 Pennsylvania Ave')",
+            "Place names or addresses to search for (e.g., ['Paris', 'Golden Gate Bridge'])",
           ),
       },
     },
-    async ({ query }): Promise<CallToolResult> => {
-      try {
-        const results = await geocodeWithNominatim(query);
+    async ({ queries }): Promise<CallToolResult> => {
+      const sections: string[] = [];
+      let hasError = false;
 
-        if (results.length === 0) {
-          return {
-            content: [
-              { type: "text", text: `No results found for "${query}"` },
-            ],
-          };
-        }
-
-        const formattedResults = results.map((r) => ({
-          displayName: r.display_name,
-          lat: parseFloat(r.lat),
-          lon: parseFloat(r.lon),
-          boundingBox: {
-            south: parseFloat(r.boundingbox[0]),
-            north: parseFloat(r.boundingbox[1]),
-            west: parseFloat(r.boundingbox[2]),
-            east: parseFloat(r.boundingbox[3]),
-          },
-          type: r.type,
-          importance: r.importance,
-        }));
-
-        const textContent = formattedResults
-          .map(
+      for (const query of queries) {
+        try {
+          const results = await geocodeWithNominatim(query);
+          if (results.length === 0) {
+            sections.push(`## ${query}\nNo results found.`);
+            continue;
+          }
+          const formatted = results.map((r) => ({
+            displayName: r.display_name,
+            lat: parseFloat(r.lat),
+            lon: parseFloat(r.lon),
+            boundingBox: {
+              south: parseFloat(r.boundingbox[0]),
+              north: parseFloat(r.boundingbox[1]),
+              west: parseFloat(r.boundingbox[2]),
+              east: parseFloat(r.boundingbox[3]),
+            },
+            type: r.type,
+            importance: r.importance,
+          }));
+          const lines = formatted.map(
             (r, i) =>
               `${i + 1}. ${r.displayName}\n   Coordinates: ${r.lat.toFixed(6)}, ${r.lon.toFixed(6)}\n   Bounding box: W:${r.boundingBox.west.toFixed(4)}, S:${r.boundingBox.south.toFixed(4)}, E:${r.boundingBox.east.toFixed(4)}, N:${r.boundingBox.north.toFixed(4)}`,
-          )
-          .join("\n\n");
-
-        return {
-          content: [{ type: "text", text: textContent }],
-        };
-      } catch (error) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Geocoding error: ${error instanceof Error ? error.message : String(error)}`,
-            },
-          ],
-          isError: true,
-        };
+          );
+          sections.push(`## ${query}\n${lines.join("\n\n")}`);
+        } catch (error) {
+          hasError = true;
+          sections.push(
+            `## ${query}\nError: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
+
+      return {
+        content: [{ type: "text", text: sections.join("\n\n") }],
+        isError: hasError ? true : undefined,
+      };
     },
   );
 

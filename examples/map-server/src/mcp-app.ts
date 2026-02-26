@@ -725,7 +725,25 @@ app.onhostcontextchanged = (params) => {
   }
 };
 
-// Handle initial tool input (bounding box from show-map tool)
+/**
+ * Compute a bounding box from a center point and radius in km.
+ */
+function bboxFromCenter(
+  lat: number,
+  lon: number,
+  radiusKm: number,
+): BoundingBox {
+  const latDelta = radiusKm / 111;
+  const lonDelta = radiusKm / (111 * Math.cos((lat * Math.PI) / 180));
+  return {
+    west: lon - lonDelta,
+    south: lat - latDelta,
+    east: lon + lonDelta,
+    north: lat + latDelta,
+  };
+}
+
+// Handle initial tool input (bounding box or center+radius from show-map tool)
 app.ontoolinput = async (params) => {
   log.info("Received tool input:", params);
   const args = params.arguments as
@@ -735,12 +753,16 @@ app.ontoolinput = async (params) => {
         south?: number;
         east?: number;
         north?: number;
+        latitude?: number;
+        longitude?: number;
+        radiusKm?: number;
         label?: string;
+        markers?: (MarkerDef & { id: string })[];
       }
     | undefined;
 
   if (args && viewer) {
-    // Handle both nested boundingBox and flat format
+    // Resolve bounding box
     let bbox: BoundingBox | null = null;
 
     if (args.boundingBox) {
@@ -757,25 +779,31 @@ app.ontoolinput = async (params) => {
         east: args.east,
         north: args.north,
       };
+    } else if (args.latitude !== undefined && args.longitude !== undefined) {
+      bbox = bboxFromCenter(args.latitude, args.longitude, args.radiusKm ?? 50);
     }
 
     if (bbox) {
-      // Mark that we received explicit tool input (overrides persisted state)
       hasReceivedToolInput = true;
       log.info("Positioning camera to bbox:", bbox);
-
-      // Position camera instantly (no animation)
       setViewToBoundingBox(viewer, bbox);
-
-      // Wait for tiles to load at this location
       await waitForTilesLoaded(viewer);
-
-      // Now hide loading indicator
       hideLoading();
-
       log.info(
         "Camera positioned, tiles loaded. Height:",
         viewer.camera.positionCartographic.height,
+      );
+    }
+
+    // Add initial markers from tool input
+    if (args.markers && args.markers.length > 0) {
+      for (const m of args.markers) {
+        addMarker(viewer, m.id, m.latitude, m.longitude, m.label, m.color);
+      }
+      log.info(
+        "Added",
+        args.markers.length,
+        "initial marker(s) from tool input",
       );
     }
   }
@@ -1192,6 +1220,17 @@ app.ontoolresult = async (result) => {
       await waitForTilesLoaded(viewer);
       hideLoading();
     }
+  }
+
+  // Add initial markers from structuredContent (if any)
+  const sc = result.structuredContent as
+    | { markers?: (MarkerDef & { id: string })[] }
+    | undefined;
+  if (viewer && sc?.markers && sc.markers.length > 0) {
+    for (const m of sc.markers) {
+      addMarker(viewer, m.id, m.latitude, m.longitude, m.label, m.color);
+    }
+    log.info("Added", sc.markers.length, "initial marker(s) from tool result");
   }
 
   // Start polling for commands now that we have viewUUID
