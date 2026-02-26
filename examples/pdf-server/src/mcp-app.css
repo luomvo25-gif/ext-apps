@@ -222,7 +222,8 @@ body {
 /* Single Page Canvas Container */
 .canvas-container {
   flex: 1;
-  overflow: visible;
+  overflow-x: auto; /* Allow horizontal scrolling when zoomed in inline mode */
+  overflow-y: visible;
   display: flex;
   justify-content: center;
   align-items: flex-start;
