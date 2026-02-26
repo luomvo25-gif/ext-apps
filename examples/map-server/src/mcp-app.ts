@@ -862,6 +862,57 @@ function allMarkers(): TrackedMarker[] {
   return Array.from(markerMap.values());
 }
 
+/** Persist current markers to localStorage */
+function persistMarkers(): void {
+  if (!viewUUID) return;
+  try {
+    const data = allMarkers().map(
+      ({ id, latitude, longitude, label, color }) => ({
+        id,
+        latitude,
+        longitude,
+        label,
+        color,
+      }),
+    );
+    localStorage.setItem(`${viewUUID}:markers`, JSON.stringify(data));
+  } catch (e) {
+    log.warn("Failed to persist markers:", e);
+  }
+}
+
+/** Load persisted markers from localStorage and add them to the map */
+function restorePersistedMarkers(cesiumViewer: any): void {
+  if (!viewUUID) return;
+  try {
+    const stored = localStorage.getItem(`${viewUUID}:markers`);
+    if (!stored) return;
+    const data = JSON.parse(stored) as {
+      id: string;
+      latitude: number;
+      longitude: number;
+      label?: string;
+      color?: string;
+    }[];
+    if (!Array.isArray(data) || data.length === 0) return;
+    for (const m of data) {
+      if (!markerMap.has(m.id)) {
+        addMarker(
+          cesiumViewer,
+          m.id,
+          m.latitude,
+          m.longitude,
+          m.label,
+          m.color,
+        );
+      }
+    }
+    log.info("Restored", data.length, "persisted marker(s)");
+  } catch (e) {
+    log.warn("Failed to restore markers:", e);
+  }
+}
+
 /**
  * Fly camera to a bounding box with animation
  */
@@ -887,24 +938,55 @@ function flyToBoundingBox(
 }
 
 /**
- * Build Cesium label options for a marker
+ * Render a label as a canvas image with rounded-rect background.
+ * Returns a data URL suitable for Cesium billboard.image.
  */
-function buildLabelOptions(text: string): any {
-  return {
-    text,
-    font: "bold 14px sans-serif",
-    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-    outlineWidth: 3,
-    outlineColor: Cesium.Color.BLACK,
-    fillColor: Cesium.Color.WHITE,
-    showBackground: true,
-    backgroundColor: new Cesium.Color(0, 0, 0, 0.65),
-    backgroundPadding: new Cesium.Cartesian2(6, 4),
-    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-    pixelOffset: new Cesium.Cartesian2(0, -16),
-    heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-    disableDepthTestDistance: Number.POSITIVE_INFINITY,
-  };
+function renderLabelImage(text: string): string {
+  const dpr = window.devicePixelRatio || 1;
+  const fontSize = 13 * dpr;
+  const font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+  const padX = 8 * dpr;
+  const padY = 5 * dpr;
+  const radius = 5 * dpr;
+
+  // Measure text
+  const measure = document.createElement("canvas").getContext("2d")!;
+  measure.font = font;
+  const metrics = measure.measureText(text);
+  const textW = Math.ceil(metrics.width);
+  const textH = fontSize; // approximate em height
+
+  const w = textW + padX * 2;
+  const h = textH + padY * 2;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+
+  // Rounded rect background
+  ctx.beginPath();
+  ctx.moveTo(radius, 0);
+  ctx.lineTo(w - radius, 0);
+  ctx.quadraticCurveTo(w, 0, w, radius);
+  ctx.lineTo(w, h - radius);
+  ctx.quadraticCurveTo(w, h, w - radius, h);
+  ctx.lineTo(radius, h);
+  ctx.quadraticCurveTo(0, h, 0, h - radius);
+  ctx.lineTo(0, radius);
+  ctx.quadraticCurveTo(0, 0, radius, 0);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(30, 30, 30, 0.78)";
+  ctx.fill();
+
+  // Text
+  ctx.font = font;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#fff";
+  ctx.fillText(text, padX, h / 2);
+
+  return canvas.toDataURL("image/png");
 }
 
 /**
@@ -932,6 +1014,7 @@ function addMarker(
   const position = Cesium.Cartesian3.fromDegrees(lon, lat);
   const cesiumColor = parseCesiumColor(color || "red");
 
+  const dpr = window.devicePixelRatio || 1;
   const entityOptions: any = {
     position,
     point: {
@@ -944,7 +1027,14 @@ function addMarker(
   };
 
   if (label) {
-    entityOptions.label = buildLabelOptions(label);
+    entityOptions.billboard = {
+      image: renderLabelImage(label),
+      scale: 1 / dpr,
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      pixelOffset: new Cesium.Cartesian2(0, -14),
+      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    };
   }
 
   const entity = cesiumViewer.entities.add(entityOptions);
@@ -957,6 +1047,7 @@ function addMarker(
     entity,
   });
   updateCopyButton();
+  persistMarkers();
   log.info("Added marker", id, "at", lat, lon, label || "");
 }
 
@@ -993,15 +1084,24 @@ function updateMarker(
   }
 
   if (updates.label !== undefined) {
+    const dpr = window.devicePixelRatio || 1;
     if (updates.label) {
-      entity.label = buildLabelOptions(updates.label);
+      entity.billboard = {
+        image: renderLabelImage(updates.label),
+        scale: 1 / dpr,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -14),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      };
     } else {
-      entity.label = undefined;
+      entity.billboard = undefined;
     }
     tracked.label = updates.label || undefined;
   }
 
   updateCopyButton();
+  persistMarkers();
   log.info("Updated marker", id, updates);
 }
 
@@ -1017,6 +1117,7 @@ function removeMarker(cesiumViewer: any, id: string): void {
   cesiumViewer.entities.remove(tracked.entity);
   markerMap.delete(id);
   updateCopyButton();
+  persistMarkers();
   log.info("Removed marker", id);
 }
 
@@ -1222,13 +1323,20 @@ app.ontoolresult = async (result) => {
     }
   }
 
-  // Add initial markers from _meta (if any)
+  // Restore persisted markers first, then add any new initial ones
+  if (viewer && viewUUID) {
+    restorePersistedMarkers(viewer);
+  }
+
+  // Add initial markers from _meta (if any — skips duplicates via markerMap)
   const initialMarkers = result._meta?.initialMarkers as
     | (MarkerDef & { id: string })[]
     | undefined;
   if (viewer && initialMarkers && initialMarkers.length > 0) {
     for (const m of initialMarkers) {
-      addMarker(viewer, m.id, m.latitude, m.longitude, m.label, m.color);
+      if (!markerMap.has(m.id)) {
+        addMarker(viewer, m.id, m.latitude, m.longitude, m.label, m.color);
+      }
     }
     log.info(
       "Added",
