@@ -65,6 +65,10 @@ interface BoundingBox {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let viewer: any = null;
 
+// CustomDataSource for annotations (enables EntityCluster)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let annotationDataSource: any = null;
+
 // Debounce timer for reverse geocoding
 let reverseGeocodeTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -485,6 +489,32 @@ async function initCesium(): Promise<any> {
 
   log.info("Camera positioned, initial rendering started");
 
+  // Create a CustomDataSource for annotations with clustering enabled
+  const ds = new Cesium.CustomDataSource("annotations");
+  ds.clustering.enabled = true;
+  ds.clustering.pixelRange = 40;
+  ds.clustering.minimumClusterSize = 2;
+  ds.clustering.clusterBillboards = true;
+  ds.clustering.clusterLabels = true;
+  ds.clustering.clusterPoints = true;
+
+  // Style clusters with a count label rendered as a billboard
+  ds.clustering.clusterEvent.addEventListener(
+    (clusteredEntities: any[], cluster: any) => {
+      cluster.label.show = false;
+      cluster.billboard.show = true;
+      cluster.billboard.image = renderClusterImage(clusteredEntities.length);
+      cluster.billboard.verticalOrigin = Cesium.VerticalOrigin.CENTER;
+      cluster.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+      const dpr = window.devicePixelRatio || 1;
+      cluster.billboard.scale = 1 / dpr;
+    },
+  );
+
+  cesiumViewer.dataSources.add(ds);
+  annotationDataSource = ds;
+  log.info("Annotation data source with clustering created");
+
   // Set up camera move end listener for reverse geocoding and view persistence
   cesiumViewer.camera.moveEnd.addEventListener(() => {
     scheduleLocationUpdate(cesiumViewer);
@@ -651,7 +681,7 @@ async function toggleFullscreen(): Promise<void> {
 /**
  * Handle keyboard shortcuts for fullscreen control
  * - Escape: Exit fullscreen (when in fullscreen mode)
- * - Ctrl/Cmd+Enter: Toggle fullscreen
+ * - Alt+Enter: Toggle fullscreen
  */
 function handleFullscreenKeyboard(event: KeyboardEvent): void {
   // Escape to exit fullscreen
@@ -661,11 +691,12 @@ function handleFullscreenKeyboard(event: KeyboardEvent): void {
     return;
   }
 
-  // Ctrl+Enter (Windows/Linux) or Cmd+Enter (Mac) to toggle fullscreen
+  // Alt+Enter to toggle fullscreen
   if (
     event.key === "Enter" &&
-    (event.ctrlKey || event.metaKey) &&
-    !event.altKey
+    event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey
   ) {
     event.preventDefault();
     toggleFullscreen();
@@ -874,6 +905,40 @@ function parseCesiumColor(cssColor: string, fallback?: string): any {
 }
 
 /**
+ * Render a cluster count badge as a canvas image.
+ * Returns a data URL suitable for Cesium billboard.image.
+ */
+function renderClusterImage(count: number): string {
+  const dpr = window.devicePixelRatio || 1;
+  const size = Math.round(36 * dpr);
+  const fontSize = Math.round(13 * dpr);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+
+  // Circle background
+  const r = size / 2;
+  ctx.beginPath();
+  ctx.arc(r, r, r - 1, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(50, 100, 200, 0.85)";
+  ctx.fill();
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = Math.round(2 * dpr);
+  ctx.stroke();
+
+  // Count text
+  ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#fff";
+  ctx.fillText(String(count), r, r);
+
+  return canvas.toDataURL("image/png");
+}
+
+/**
  * Render a label as a canvas image with rounded-rect background.
  * Returns a data URL suitable for Cesium billboard.image.
  */
@@ -922,13 +987,12 @@ function renderLabelImage(text: string): string {
  * Create a label billboard entity at a given position
  */
 function createLabelEntity(
-  cesiumViewer: any,
   position: any,
   text: string,
   verticalOffset: number = -12,
 ): any {
   const dpr = window.devicePixelRatio || 1;
-  return cesiumViewer.entities.add({
+  return annotationDataSource.entities.add({
     position,
     billboard: {
       image: renderLabelImage(text),
@@ -1007,7 +1071,7 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
 
       // Point entity (the colored dot)
       entities.push(
-        cesiumViewer.entities.add({
+        annotationDataSource.entities.add({
           position,
           point: {
             pixelSize: 12,
@@ -1021,7 +1085,7 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
 
       // Label entity (separate so it doesn't conflict with point rendering)
       if (def.label) {
-        entities.push(createLabelEntity(cesiumViewer, position, def.label));
+        entities.push(createLabelEntity(position, def.label));
       }
       break;
     }
@@ -1045,7 +1109,7 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
         : cesiumColor;
 
       entities.push(
-        cesiumViewer.entities.add({
+        annotationDataSource.entities.add({
           polyline: {
             positions,
             width: def.width ?? 3,
@@ -1061,7 +1125,7 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
           mid.longitude,
           mid.latitude,
         );
-        entities.push(createLabelEntity(cesiumViewer, labelPos, def.label, 0));
+        entities.push(createLabelEntity(labelPos, def.label, 0));
       }
       break;
     }
@@ -1080,7 +1144,7 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
         : outlineColor.withAlpha(0.2);
 
       entities.push(
-        cesiumViewer.entities.add({
+        annotationDataSource.entities.add({
           polygon: {
             hierarchy: positions,
             material: fillColor,
@@ -1094,7 +1158,7 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
       if (def.label) {
         const c = centroid(def.points);
         const labelPos = Cesium.Cartesian3.fromDegrees(c.longitude, c.latitude);
-        entities.push(createLabelEntity(cesiumViewer, labelPos, def.label, 0));
+        entities.push(createLabelEntity(labelPos, def.label, 0));
       }
       break;
     }
@@ -1110,7 +1174,7 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
         : outlineColor.withAlpha(0.15);
 
       entities.push(
-        cesiumViewer.entities.add({
+        annotationDataSource.entities.add({
           position,
           ellipse: {
             semiMajorAxis: def.radiusKm * 1000,
@@ -1124,7 +1188,7 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
       );
 
       if (def.label) {
-        entities.push(createLabelEntity(cesiumViewer, position, def.label, 0));
+        entities.push(createLabelEntity(position, def.label, 0));
       }
       break;
     }
@@ -1157,14 +1221,14 @@ function updateAnnotation(cesiumViewer: any, update: AnnotationUpdate): void {
 /**
  * Remove an annotation from the map
  */
-function removeAnnotation(cesiumViewer: any, id: string): void {
+function removeAnnotation(_cesiumViewer: any, id: string): void {
   const tracked = annotationMap.get(id);
   if (!tracked) {
     log.warn("removeAnnotation: unknown id", id);
     return;
   }
   for (const entity of tracked.entities) {
-    cesiumViewer.entities.remove(entity);
+    annotationDataSource.entities.remove(entity);
   }
   annotationMap.delete(id);
   updateCopyButton();
@@ -1729,7 +1793,7 @@ async function initialize() {
       fullscreenBtn.addEventListener("click", toggleFullscreen);
     }
 
-    // Set up keyboard shortcuts for fullscreen (Escape to exit, Ctrl/Cmd+Enter to toggle)
+    // Set up keyboard shortcuts for fullscreen (Escape to exit, Alt+Enter to toggle)
     document.addEventListener("keydown", handleFullscreenKeyboard);
 
     // Set up copy button
