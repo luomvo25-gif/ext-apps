@@ -1207,6 +1207,10 @@ function updateAnnotationsBadge(): void {
   }
   // Show/hide the toolbar button based on whether items exist
   annotationsBtn.style.display = count > 0 ? "" : "none";
+  // Auto-close panel/strip when all items are gone
+  if (count === 0 && annotationPanelOpen) {
+    setAnnotationPanelOpen(false);
+  }
 }
 
 function getAnnotationPreview(def: PdfAnnotationDef): string {

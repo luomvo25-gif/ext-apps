@@ -929,7 +929,7 @@ Use this tool when the user wants to:
 - Annotate a PDF (highlight, underline, add notes, stamps, etc.)
 - Review or interact with a PDF document
 
-IMPORTANT: If a PDF viewer is already open (you have a viewUUID from a previous display_pdf call), do NOT call display_pdf again for the same PDF. Instead, use the \`interact\` tool with the existing viewUUID to add annotations, fill forms, navigate pages, etc. Only call display_pdf again if the user explicitly requests a new/different PDF or a fresh view.
+**CRITICAL — DO NOT call display_pdf to add annotations, highlights, stamps, rectangles, or any other modifications to an already-displayed PDF.** If you already have a viewUUID from a previous display_pdf call, you MUST use the \`interact\` tool instead (e.g. \`interact\` with action \`add_annotations\`, \`highlight_text\`, \`fill_form\`, etc.). Calling display_pdf again discards the existing viewer and all its state. Only call display_pdf if the user asks to open a DIFFERENT PDF or explicitly requests a fresh/new view.
 
 Accepts:
 - Local files explicitly added to the server (use list_pdfs to see available files)
