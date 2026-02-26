@@ -2785,12 +2785,16 @@ function processCommands(commands: PdfCommand[]): void {
   persistAnnotations();
 }
 
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+let polling = false;
 
 function startPolling(): void {
-  if (pollTimer) return;
-  pollTimer = setInterval(async () => {
-    if (!viewUUID) return;
+  if (polling) return;
+  polling = true;
+  pollLoop();
+}
+
+async function pollLoop(): Promise<void> {
+  while (polling && viewUUID) {
     try {
       const result = await app.callServerTool({
         name: "poll_pdf_commands",
@@ -2805,15 +2809,14 @@ function startPolling(): void {
       }
     } catch (err) {
       log.error("Poll error:", err);
+      // Back off on error to avoid tight error loops
+      await new Promise((r) => setTimeout(r, 2000));
     }
-  }, 300);
+  }
 }
 
 function stopPolling(): void {
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = null;
-  }
+  polling = false;
 }
 
 function handleHostContextChanged(ctx: McpUiHostContext) {

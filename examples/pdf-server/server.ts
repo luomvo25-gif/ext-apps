@@ -67,6 +67,7 @@ const SWEEP_INTERVAL_MS = 30_000; // 30 seconds
 
 /** Fixed batch window: when commands are present, wait this long before returning to let more accumulate */
 const POLL_BATCH_WAIT_MS = 200;
+const LONG_POLL_TIMEOUT_MS = 30_000; // Max time to hold a long-poll request open
 
 // =============================================================================
 // Annotation Types
@@ -247,6 +248,9 @@ interface QueueEntry {
 
 const commandQueues = new Map<string, QueueEntry>();
 
+/** Waiters for long-poll: resolve callback wakes up a blocked poll_pdf_commands */
+const pollWaiters = new Map<string, () => void>();
+
 /** Active viewer UUIDs — tracks UUIDs issued by display_pdf */
 const activeViewUUIDs = new Set<string>();
 
@@ -270,6 +274,13 @@ function enqueueCommand(viewUUID: string, command: PdfCommand): void {
   }
   entry.commands.push(command);
   entry.lastActivity = Date.now();
+
+  // Wake up any long-polling request waiting for this viewUUID
+  const waiter = pollWaiters.get(viewUUID);
+  if (waiter) {
+    pollWaiters.delete(viewUUID);
+    waiter();
+  }
 }
 
 function dequeueCommands(viewUUID: string): PdfCommand[] {
@@ -1300,9 +1311,28 @@ Example — add a highlight and a stamp on page 1:
       _meta: { ui: { visibility: ["app"] } },
     },
     async ({ viewUUID: uuid }): Promise<CallToolResult> => {
-      // If commands are queued, wait a fixed window to let more accumulate
+      // If commands are already queued, wait briefly to let more accumulate
       if (commandQueues.has(uuid)) {
         await new Promise((r) => setTimeout(r, POLL_BATCH_WAIT_MS));
+      } else {
+        // Long-poll: wait for commands to arrive or timeout
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(() => {
+            pollWaiters.delete(uuid);
+            resolve();
+          }, LONG_POLL_TIMEOUT_MS);
+          // Cancel any existing waiter for this uuid
+          const prev = pollWaiters.get(uuid);
+          if (prev) prev();
+          pollWaiters.set(uuid, () => {
+            clearTimeout(timer);
+            resolve();
+          });
+        });
+        // After waking, wait briefly for batching
+        if (commandQueues.has(uuid)) {
+          await new Promise((r) => setTimeout(r, POLL_BATCH_WAIT_MS));
+        }
       }
       const commands = dequeueCommands(uuid);
       return {
