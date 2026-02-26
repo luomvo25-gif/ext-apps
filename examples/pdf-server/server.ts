@@ -844,7 +844,7 @@ Accepts:
         content: [
           {
             type: "text",
-            text: `Displaying PDF (viewUUID: ${uuid}): ${normalized}.\n\nUse the interact tool with this viewUUID to:\n- ANNOTATE: add highlights, underlines, notes, stamps (APPROVED/DRAFT/…), rectangles, freetext, strikethroughs\n- HIGHLIGHT TEXT by search query (highlight_text action)\n- NAVIGATE pages, SEARCH text, ZOOM\n- GET PAGES: extract text and/or screenshots from page ranges (get_pages action)\n- FILL FORM fields\n- DOWNLOAD the annotated PDF\n\nThe viewer supports full annotation capabilities — use add_annotations to mark up the document.`,
+            text: `Displaying PDF (viewUUID: ${uuid}): ${normalized}.\n\nUse the \`interact\` tool with this viewUUID. Available actions:\n- navigate: go to a page\n- search / find: search text (search highlights in UI, find is silent)\n- search_navigate: jump to a search match by index\n- zoom: set zoom level (0.5–3.0)\n- add_annotations: add highlights, underlines, strikethroughs, notes, rectangles, freetext, stamps (APPROVED/DRAFT/CONFIDENTIAL/FINAL/VOID/REJECTED)\n- update_annotations: partially update existing annotations\n- remove_annotations: remove annotations by ID\n- highlight_text: find text by query and highlight it automatically\n- fill_form: fill PDF form fields\n- get_pages: extract text and/or screenshots from page ranges without navigating`,
           },
         ],
         structuredContent: {

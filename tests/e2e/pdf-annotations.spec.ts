@@ -103,12 +103,12 @@ test.describe("PDF Server - Annotations", () => {
     await expect(resultContent).toBeVisible({ timeout: 5000 });
     const resultText = (await resultContent.textContent()) ?? "";
 
-    // Verify the result text mentions annotation capabilities
-    expect(resultText).toContain("ANNOTATE");
+    // Verify the result text enumerates interact actions including annotations
     expect(resultText).toContain("add_annotations");
-    expect(resultText).toContain("highlights");
+    expect(resultText).toContain("highlight_text");
+    expect(resultText).toContain("navigate");
+    expect(resultText).toContain("get_pages");
     expect(resultText).toContain("stamps");
-    expect(resultText).toContain("annotation capabilities");
   });
 
   test("interact tool is available in tool dropdown", async ({ page }) => {

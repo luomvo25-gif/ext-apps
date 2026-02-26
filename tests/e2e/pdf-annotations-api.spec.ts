@@ -170,15 +170,17 @@ Example — add a highlight and a stamp on page 1:
 // Simulated display_pdf result the model would see after calling display_pdf
 const DISPLAY_PDF_RESULT_TEXT = `Displaying PDF (viewUUID: abc-123-def): https://arxiv.org/pdf/1706.03762.
 
-Use the interact tool with this viewUUID to:
-- ANNOTATE: add highlights, underlines, notes, stamps (APPROVED/DRAFT/…), rectangles, freetext, strikethroughs
-- HIGHLIGHT TEXT by search query (highlight_text action)
-- NAVIGATE pages, SEARCH text, ZOOM
-- GET PAGES: extract text and/or screenshots from page ranges (get_pages action)
-- FILL FORM fields
-- DOWNLOAD the annotated PDF
-
-The viewer supports full annotation capabilities — use add_annotations to mark up the document.`;
+Use the \`interact\` tool with this viewUUID. Available actions:
+- navigate: go to a page
+- search / find: search text (search highlights in UI, find is silent)
+- search_navigate: jump to a search match by index
+- zoom: set zoom level (0.5–3.0)
+- add_annotations: add highlights, underlines, strikethroughs, notes, rectangles, freetext, stamps (APPROVED/DRAFT/CONFIDENTIAL/FINAL/VOID/REJECTED)
+- update_annotations: partially update existing annotations
+- remove_annotations: remove annotations by ID
+- highlight_text: find text by query and highlight it automatically
+- fill_form: fill PDF form fields
+- get_pages: extract text and/or screenshots from page ranges without navigating`;
 
 /**
  * Conversation history simulating: user asked to display a PDF, model called
