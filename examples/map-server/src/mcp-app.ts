@@ -1611,7 +1611,9 @@ app.ontoolinput = async (params) => {
       bbox = bboxFromCenter(args.latitude, args.longitude, args.radiusKm ?? 50);
     }
 
-    if (bbox) {
+    // Only position camera if we haven't already (from streaming partial).
+    // If the user panned/zoomed during streaming, don't override their view.
+    if (bbox && !hasPositionedFromPartial) {
       hasReceivedToolInput = true;
       log.info("Positioning camera to bbox:", bbox);
       setViewToBoundingBox(viewer, bbox);
@@ -1629,7 +1631,7 @@ app.ontoolinput = async (params) => {
       );
     }
 
-    if (bbox) {
+    if (bbox && !hasPositionedFromPartial) {
       await waitForTilesLoaded(viewer);
       hideLoading();
       log.info(
