@@ -862,14 +862,18 @@ function addMarker(
   if (label) {
     entityOptions.label = {
       text: label,
-      font: "14px sans-serif",
+      font: "bold 14px sans-serif",
       style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-      outlineWidth: 2,
+      outlineWidth: 3,
       outlineColor: Cesium.Color.BLACK,
       fillColor: Cesium.Color.WHITE,
+      showBackground: true,
+      backgroundColor: new Cesium.Color(0, 0, 0, 0.65),
+      backgroundPadding: new Cesium.Cartesian2(6, 4),
       verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
       pixelOffset: new Cesium.Cartesian2(0, -16),
       heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
     };
   }
 
