@@ -2091,14 +2091,35 @@ async function buildFieldNameMap(
         if (firstField && typeof firstField.page === "number") {
           fieldNameToPage.set(name, firstField.page + 1);
         }
-        // Store human-readable label from PDF TU field
-        if (firstField?.alternativeText) {
-          fieldNameToLabel.set(name, firstField.alternativeText);
-        }
       }
     }
   } catch {
     // getFieldObjects may fail on some PDFs — fall back to no mapping
+  }
+
+  // Collect human-readable labels (alternativeText / TU) from per-page annotations,
+  // since getFieldObjects() doesn't include alternativeText.
+  if (fieldNameToIds.size > 0) {
+    const pagesToScan = new Set(fieldNameToPage.values());
+    // If no pages known, scan all
+    if (pagesToScan.size === 0) {
+      for (let i = 1; i <= doc.numPages; i++) pagesToScan.add(i);
+    }
+    try {
+      for (const pageNum of pagesToScan) {
+        const page = await doc.getPage(pageNum);
+        const annotations = await page.getAnnotations();
+        for (const ann of annotations) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const a = ann as any;
+          if (a.fieldName && a.alternativeText) {
+            fieldNameToLabel.set(a.fieldName, a.alternativeText);
+          }
+        }
+      }
+    } catch {
+      // Annotation iteration may fail on some PDFs
+    }
   }
   log.info(`Built field name map: ${fieldNameToIds.size} fields`);
 }
