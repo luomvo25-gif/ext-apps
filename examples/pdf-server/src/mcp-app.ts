@@ -803,12 +803,18 @@ async function updatePageContext() {
       selection,
     );
 
+    // Get page dimensions in PDF points for model context
+    const viewport = page.getViewport({ scale: 1.0 });
+    const pageWidthPt = Math.round(viewport.width);
+    const pageHeightPt = Math.round(viewport.height);
+
     // Build context with tool ID for multi-tool disambiguation
     const toolId = app.getHostContext()?.toolInfo?.id;
     const header = [
       `PDF viewer${toolId ? ` (${toolId})` : ""}`,
       pdfTitle ? `"${pdfTitle}"` : pdfUrl,
       `Current Page: ${currentPage}/${totalPages}`,
+      `Page size: ${pageWidthPt}×${pageHeightPt}pt (coordinates: origin at bottom-left, Y increases upward)`,
     ].join(" | ");
 
     // Include search status if active
@@ -3240,9 +3246,9 @@ app.ontoolresult = async (result: CallToolResult) => {
     loadingIndicatorEl.style.display = "none";
 
     showViewer();
-    downloadBtn.style.display = app.getHostCapabilities()?.downloadFile
-      ? ""
-      : "none";
+    // TODO: Re-enable capability check when host downloadFile is fixed:
+    // downloadBtn.style.display = app.getHostCapabilities()?.downloadFile ? "" : "none";
+    downloadBtn.style.display = "";
     // Restore any persisted annotations
     restoreAnnotations();
 

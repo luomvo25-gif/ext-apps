@@ -1086,9 +1086,13 @@ IMPORTANT: viewUUID must be the exact UUID returned by display_pdf (e.g. "a1b2c3
 **ANNOTATION** — You can add visual annotations to any page. Use add_annotations with an array of annotation objects.
 Each annotation needs: id (unique string), type, page (1-indexed).
 
-**COORDINATE SYSTEM**: PDF points (72 dpi), origin at BOTTOM-LEFT of the page.
-Y increases UPWARD: y=0 is the bottom edge, y=792 is the top edge (for US Letter).
-A typical US Letter page is 612×792 points. To place something near the top, use y≈750. To place near the bottom, use y≈50.
+**COORDINATE SYSTEM**: All coordinates are in PDF points (1 point = 1/72 inch).
+- Origin is at the BOTTOM-LEFT corner of the page.
+- X increases to the right (x=0 is left edge).
+- Y increases UPWARD (y=0 is bottom edge, y=pageHeight is top edge).
+- The model context shows the current page size (e.g. "Page size: 612×792pt"). Use these values to position annotations correctly.
+- For US Letter (612×792pt): top of page ≈ y=750, middle ≈ y=400, bottom ≈ y=50. Left margin ≈ x=72, right margin ≈ x=540.
+- For rects (highlight/underline/strikethrough): {x, y, width, height} where y is the BOTTOM edge of the rect.
 
 Annotation types:
 • highlight: rects:[{x,y,width,height}], color?, content? — semi-transparent overlay on text regions
@@ -1099,7 +1103,9 @@ Annotation types:
 • freetext: x, y, content, fontSize?, color? — arbitrary text label
 • stamp: x, y, label (APPROVED|DRAFT|CONFIDENTIAL|FINAL|VOID|REJECTED), color?, rotation? — stamp overlay
 
-Example — highlight near page top (y=700 = near top) and stamp in middle (y=400):
+TIP: Use get_pages with getScreenshots=true to see what's on a page, then use the page size from model context to calculate coordinates. For text-based annotations, prefer highlight_text (auto-finds text by query) over manually placing rects.
+
+Example — highlight near page top (y=700 = near top) and stamp in middle (y=400) on US Letter:
 \`\`\`json
 {"action":"add_annotations","viewUUID":"…","annotations":[
   {"id":"h1","type":"highlight","page":1,"rects":[{"x":72,"y":700,"width":200,"height":12}]},
