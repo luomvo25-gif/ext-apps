@@ -2770,6 +2770,29 @@ async function renderPage() {
           fieldObjects: cachedFieldObjects,
         } as any);
 
+        // Fix combo reset: PDF.js resets combos by deselecting all options,
+        // but the browser then shows the first real option. Re-insert a
+        // hidden empty placeholder so the combo appears blank after reset.
+        for (const sel of formLayerEl.querySelectorAll<HTMLSelectElement>(
+          "select:not([size])",
+        )) {
+          sel.addEventListener("resetform", () => {
+            // If no option ended up selected, prepend a hidden blank
+            if (sel.selectedIndex === -1 || !sel.value || sel.value === " ") {
+              const blank = document.createElement("option");
+              blank.value = " ";
+              blank.setAttribute("hidden", "true");
+              blank.setAttribute("selected", "true");
+              sel.prepend(blank);
+              const removeBlank = () => {
+                blank.remove();
+                sel.removeEventListener("input", removeBlank);
+              };
+              sel.addEventListener("input", removeBlank);
+            }
+          });
+        }
+
         // Fix listbox font sizes: the default AnnotationLayer CSS uses
         // a fixed 9px * scale-factor which can overflow when many options
         // share a small PDF rect. Shrink font to fit.
