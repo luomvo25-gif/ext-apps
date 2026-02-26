@@ -194,6 +194,46 @@ function performSearch(query: string) {
       goToPage(match.pageNum);
     }
   }
+
+  // Update model context with search results
+  updatePageContext();
+}
+
+/**
+ * Silent search: populate matches and report via model context
+ * without opening the search bar or rendering highlights.
+ */
+function performSilentSearch(query: string) {
+  allMatches = [];
+  currentMatchIndex = -1;
+  searchQuery = query;
+
+  if (!query) {
+    updatePageContext();
+    return;
+  }
+
+  const lowerQuery = query.toLowerCase();
+  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+    const pageText = pageTextCache.get(pageNum);
+    if (!pageText) continue;
+    const lowerText = pageText.toLowerCase();
+    let startIdx = 0;
+    while (true) {
+      const idx = lowerText.indexOf(lowerQuery, startIdx);
+      if (idx === -1) break;
+      allMatches.push({ pageNum, index: idx, length: query.length });
+      startIdx = idx + 1;
+    }
+  }
+
+  if (allMatches.length > 0) {
+    const idx = allMatches.findIndex((m) => m.pageNum >= currentPage);
+    currentMatchIndex = idx >= 0 ? idx : 0;
+  }
+
+  log.info(`Silent search "${query}": ${allMatches.length} matches`);
+  updatePageContext();
 }
 
 function renderHighlights() {
@@ -511,6 +551,50 @@ function findSelectionInText(
   return undefined;
 }
 
+/**
+ * Format search results with excerpts for model context.
+ * Limits to first 20 matches to avoid overwhelming the context.
+ */
+function formatSearchResults(): string {
+  const MAX_RESULTS = 20;
+  const EXCERPT_RADIUS = 40; // characters around the match
+
+  const lines: string[] = [];
+  const totalMatchCount = allMatches.length;
+  const currentIdx = currentMatchIndex >= 0 ? currentMatchIndex : -1;
+
+  lines.push(
+    `\nSearch: "${searchQuery}" (${totalMatchCount} match${totalMatchCount !== 1 ? "es" : ""} across ${new Set(allMatches.map((m) => m.pageNum)).size} page${new Set(allMatches.map((m) => m.pageNum)).size !== 1 ? "s" : ""})`,
+  );
+
+  const displayed = allMatches.slice(0, MAX_RESULTS);
+  for (let i = 0; i < displayed.length; i++) {
+    const match = displayed[i];
+    const pageText = pageTextCache.get(match.pageNum) || "";
+    const start = Math.max(0, match.index - EXCERPT_RADIUS);
+    const end = Math.min(
+      pageText.length,
+      match.index + match.length + EXCERPT_RADIUS,
+    );
+    const before = pageText.slice(start, match.index).replace(/\n/g, " ");
+    const matched = pageText.slice(match.index, match.index + match.length);
+    const after = pageText
+      .slice(match.index + match.length, end)
+      .replace(/\n/g, " ");
+    const prefix = start > 0 ? "..." : "";
+    const suffix = end < pageText.length ? "..." : "";
+    const current = i === currentIdx ? " (current)" : "";
+    lines.push(
+      `  [${i}] p.${match.pageNum}, offset ${match.index}${current}: ${prefix}${before}«${matched}»${after}${suffix}`,
+    );
+  }
+  if (totalMatchCount > MAX_RESULTS) {
+    lines.push(`  ... and ${totalMatchCount - MAX_RESULTS} more matches`);
+  }
+
+  return lines.join("\n");
+}
+
 // Extract text from current page and update model context
 async function updatePageContext() {
   if (!pdfDocument) return;
@@ -555,7 +639,15 @@ async function updatePageContext() {
       `Current Page: ${currentPage}/${totalPages}`,
     ].join(" | ");
 
-    const contextText = `${header}\n\nPage content:\n${content}`;
+    // Include search status if active
+    let searchSection = "";
+    if (searchOpen && searchQuery && allMatches.length > 0) {
+      searchSection = formatSearchResults();
+    } else if (searchOpen && searchQuery) {
+      searchSection = `\nSearch: "${searchQuery}" (no matches found)`;
+    }
+
+    const contextText = `${header}${searchSection}\n\nPage content:\n${content}`;
 
     // Build content array with text and optional screenshot
     const contentBlocks: ContentBlock[] = [{ type: "text", text: contextText }];
@@ -1284,6 +1376,11 @@ app.ontoolresult = async (result: CallToolResult) => {
     renderPage();
     // Start background preloading of all pages for text extraction
     startPreloading();
+
+    // Start polling for commands now that we have viewUUID
+    if (viewUUID) {
+      startPolling();
+    }
   } catch (err) {
     log.error("Error loading PDF:", err);
     showError(err instanceof Error ? err.message : String(err));
@@ -1294,6 +1391,96 @@ app.onerror = (err: unknown) => {
   log.error("App error:", err);
   showError(err instanceof Error ? err.message : String(err));
 };
+
+// =============================================================================
+// Command Queue Polling
+// =============================================================================
+
+type PdfCommand =
+  | { type: "navigate"; page: number }
+  | { type: "search"; query: string }
+  | { type: "find"; query: string }
+  | { type: "search_navigate"; matchIndex: number }
+  | { type: "zoom"; scale: number };
+
+/**
+ * Process a batch of commands from the server queue
+ */
+function processCommands(commands: PdfCommand[]): void {
+  if (commands.length === 0) return;
+
+  for (const cmd of commands) {
+    log.info("Processing command:", cmd.type, cmd);
+    switch (cmd.type) {
+      case "navigate":
+        if (cmd.page >= 1 && cmd.page <= totalPages) {
+          goToPage(cmd.page);
+        }
+        break;
+      case "search":
+        openSearch();
+        searchInputEl.value = cmd.query;
+        performSearch(cmd.query);
+        break;
+      case "find":
+        performSilentSearch(cmd.query);
+        break;
+      case "search_navigate":
+        if (
+          allMatches.length > 0 &&
+          cmd.matchIndex >= 0 &&
+          cmd.matchIndex < allMatches.length
+        ) {
+          currentMatchIndex = cmd.matchIndex;
+          const match = allMatches[cmd.matchIndex];
+          if (match.pageNum !== currentPage) {
+            goToPage(match.pageNum);
+          }
+          renderHighlights();
+          updateSearchUI();
+          updatePageContext();
+        }
+        break;
+      case "zoom":
+        if (cmd.scale >= 0.5 && cmd.scale <= 3.0) {
+          scale = cmd.scale;
+          renderPage();
+        }
+        break;
+    }
+  }
+}
+
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+function startPolling(): void {
+  if (pollTimer) return;
+  pollTimer = setInterval(async () => {
+    if (!viewUUID) return;
+    try {
+      const result = await app.callServerTool({
+        name: "poll_pdf_commands",
+        arguments: { viewUUID },
+      });
+      const commands =
+        (result.structuredContent as { commands?: PdfCommand[] })?.commands ||
+        [];
+      if (commands.length > 0) {
+        log.info(`Received ${commands.length} command(s)`);
+        processCommands(commands);
+      }
+    } catch (err) {
+      log.error("Poll error:", err);
+    }
+  }, 300);
+}
+
+function stopPolling(): void {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
 
 function handleHostContextChanged(ctx: McpUiHostContext) {
   log.info("Host context changed:", ctx);
@@ -1335,6 +1522,12 @@ function handleHostContextChanged(ctx: McpUiHostContext) {
     updateFullscreenButton();
   }
 }
+
+app.onteardown = async () => {
+  log.info("App is being torn down");
+  stopPolling();
+  return {};
+};
 
 app.onhostcontextchanged = handleHostContextChanged;
 

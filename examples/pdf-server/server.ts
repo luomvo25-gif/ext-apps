@@ -56,6 +56,64 @@ const DIST_DIR = import.meta.filename.endsWith(".ts")
   : import.meta.dirname;
 
 // =============================================================================
+// Command Queue (shared across stateless server instances)
+// =============================================================================
+
+/** Commands expire after this many ms if never polled */
+const COMMAND_TTL_MS = 60_000; // 60 seconds
+
+/** Periodic sweep interval to drop stale queues */
+const SWEEP_INTERVAL_MS = 30_000; // 30 seconds
+
+/** Fixed batch window: when commands are present, wait this long before returning to let more accumulate */
+const POLL_BATCH_WAIT_MS = 200;
+
+export type PdfCommand =
+  | { type: "navigate"; page: number }
+  | { type: "search"; query: string }
+  | { type: "find"; query: string }
+  | { type: "search_navigate"; matchIndex: number }
+  | { type: "zoom"; scale: number };
+
+interface QueueEntry {
+  commands: PdfCommand[];
+  /** Timestamp of the most recent enqueue or dequeue */
+  lastActivity: number;
+}
+
+const commandQueues = new Map<string, QueueEntry>();
+
+function pruneStaleQueues(): void {
+  const now = Date.now();
+  for (const [uuid, entry] of commandQueues) {
+    if (now - entry.lastActivity > COMMAND_TTL_MS) {
+      commandQueues.delete(uuid);
+    }
+  }
+}
+
+// Periodic sweep so abandoned queues don't leak
+setInterval(pruneStaleQueues, SWEEP_INTERVAL_MS).unref();
+
+function enqueueCommand(viewUUID: string, command: PdfCommand): void {
+  let entry = commandQueues.get(viewUUID);
+  if (!entry) {
+    entry = { commands: [], lastActivity: Date.now() };
+    commandQueues.set(viewUUID, entry);
+  }
+  entry.commands.push(command);
+  entry.lastActivity = Date.now();
+}
+
+function dequeueCommands(viewUUID: string): PdfCommand[] {
+  const entry = commandQueues.get(viewUUID);
+  if (!entry) return [];
+  const commands = entry.commands;
+  commandQueues.delete(viewUUID);
+  return commands;
+}
+
+// =============================================================================
 // URL Validation & Normalization
 // =============================================================================
 
@@ -616,17 +674,162 @@ Accepts:
 
       // Probe file size so the client can set up range transport without an extra fetch
       const { totalBytes } = await readPdfRange(normalized, 0, 1);
+      const uuid = randomUUID();
 
       return {
-        content: [{ type: "text", text: `Displaying PDF: ${normalized}` }],
+        content: [
+          {
+            type: "text",
+            text: `Displaying PDF (viewUUID: ${uuid}): ${normalized}. Use the interact tool with this viewUUID to navigate, search, zoom, etc.`,
+          },
+        ],
         structuredContent: {
           url: normalized,
           initialPage: page,
           totalBytes,
         },
         _meta: {
-          viewUUID: randomUUID(),
+          viewUUID: uuid,
         },
+      };
+    },
+  );
+
+  // Tool: interact - Interact with an existing PDF viewer
+  server.registerTool(
+    "interact",
+    {
+      title: "Interact with PDF",
+      description: `Send an action to an existing PDF viewer. Actions are queued and batched.
+
+Actions:
+- navigate: Go to a page. Requires \`page\`.
+- search: Search text and highlight matches in UI. Requires \`query\`. Results (with excerpts, pages, offsets) appear in model context.
+- find: Search text silently (no UI change). Requires \`query\`. Results appear in model context only.
+- search_navigate: Jump to a search match. Requires \`matchIndex\` (from search/find results).
+- zoom: Set zoom level. Requires \`scale\` (0.5–3.0).`,
+      inputSchema: {
+        viewUUID: z
+          .string()
+          .describe("The viewUUID of the PDF viewer (from display_pdf result)"),
+        action: z
+          .enum(["navigate", "search", "find", "search_navigate", "zoom"])
+          .describe("Action to perform"),
+        page: z
+          .number()
+          .min(1)
+          .optional()
+          .describe("Page number (for navigate)"),
+        query: z
+          .string()
+          .optional()
+          .describe("Search text (for search / find)"),
+        matchIndex: z
+          .number()
+          .min(0)
+          .optional()
+          .describe("Match index (for search_navigate)"),
+        scale: z
+          .number()
+          .min(0.5)
+          .max(3.0)
+          .optional()
+          .describe("Zoom scale, 1.0 = 100% (for zoom)"),
+      },
+    },
+    async ({
+      viewUUID: uuid,
+      action,
+      page,
+      query,
+      matchIndex,
+      scale,
+    }): Promise<CallToolResult> => {
+      let description: string;
+      switch (action) {
+        case "navigate":
+          if (page == null)
+            return {
+              content: [{ type: "text", text: "navigate requires `page`" }],
+              isError: true,
+            };
+          enqueueCommand(uuid, { type: "navigate", page });
+          description = `navigate to page ${page}`;
+          break;
+        case "search":
+          if (!query)
+            return {
+              content: [{ type: "text", text: "search requires `query`" }],
+              isError: true,
+            };
+          enqueueCommand(uuid, { type: "search", query });
+          description = `search for "${query}"`;
+          break;
+        case "find":
+          if (!query)
+            return {
+              content: [{ type: "text", text: "find requires `query`" }],
+              isError: true,
+            };
+          enqueueCommand(uuid, { type: "find", query });
+          description = `find "${query}" (silent)`;
+          break;
+        case "search_navigate":
+          if (matchIndex == null)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "search_navigate requires `matchIndex`",
+                },
+              ],
+              isError: true,
+            };
+          enqueueCommand(uuid, { type: "search_navigate", matchIndex });
+          description = `go to match #${matchIndex}`;
+          break;
+        case "zoom":
+          if (scale == null)
+            return {
+              content: [{ type: "text", text: "zoom requires `scale`" }],
+              isError: true,
+            };
+          enqueueCommand(uuid, { type: "zoom", scale });
+          description = `zoom to ${Math.round(scale * 100)}%`;
+          break;
+        default:
+          return {
+            content: [{ type: "text", text: `Unknown action: ${action}` }],
+            isError: true,
+          };
+      }
+      return {
+        content: [{ type: "text", text: `Queued: ${description}` }],
+      };
+    },
+  );
+
+  // Tool: poll_pdf_commands (app-only) - Poll for pending commands
+  registerAppTool(
+    server,
+    "poll_pdf_commands",
+    {
+      title: "Poll PDF Commands",
+      description: "Poll for pending commands for a PDF viewer",
+      inputSchema: {
+        viewUUID: z.string().describe("The viewUUID of the PDF viewer"),
+      },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ viewUUID: uuid }): Promise<CallToolResult> => {
+      // If commands are queued, wait a fixed window to let more accumulate
+      if (commandQueues.has(uuid)) {
+        await new Promise((r) => setTimeout(r, POLL_BATCH_WAIT_MS));
+      }
+      const commands = dequeueCommands(uuid);
+      return {
+        content: [{ type: "text", text: `${commands.length} command(s)` }],
+        structuredContent: { commands },
       };
     },
   );
