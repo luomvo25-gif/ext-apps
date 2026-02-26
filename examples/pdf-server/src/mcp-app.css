@@ -803,6 +803,7 @@ body {
 
 .annotation-card-delete {
   flex-shrink: 0;
+  margin-left: auto;
   background: none;
   border: none;
   padding: 2px;
