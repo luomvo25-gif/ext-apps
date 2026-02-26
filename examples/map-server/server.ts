@@ -199,6 +199,8 @@ export function createServer(): McpServer {
           "https://*.cesium.com",
         ],
       },
+      // Clipboard permission for the copy-markers button
+      permissions: { clipboardWrite: {} },
     },
   };
 
