@@ -877,6 +877,7 @@ Actions:
 - remove_annotations: Remove annotations by ID. Requires \`ids\` array.
 - highlight_text: Find text and highlight it. Requires \`query\`. Optional \`page\`, \`color\`, \`content\`.
 - fill_form: Fill form fields. Requires \`fields\` array of { name, value }.
+- get_pages: Get text and/or screenshots from pages without navigating. Uses \`intervals\` (page ranges with optional start/end, e.g. [{start:1,end:5}], [{}] for all). Optional \`getText\` (default true), \`getScreenshots\` (default false). Max 20 pages. Returns page content directly.
 
 Annotation types: highlight, underline, strikethrough, note, rectangle, freetext, stamp.
 Coordinates are in PDF points (72 dpi), bottom-left origin. Colors are CSS strings (e.g. "#ff0000", "rgba(255,0,0,0.5)").
@@ -897,6 +898,7 @@ Stamp labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED.`,
             "remove_annotations",
             "highlight_text",
             "fill_form",
+            "get_pages",
           ])
           .describe("Action to perform"),
         page: z
@@ -943,6 +945,22 @@ Stamp labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED.`,
           .describe(
             "Form fields to fill (for fill_form): { name, value } where value is string or boolean",
           ),
+        intervals: z
+          .array(PageInterval)
+          .optional()
+          .describe(
+            "Page ranges for get_pages. Each has optional start/end. [{start:1,end:5}], [{}] = all pages.",
+          ),
+        getText: z
+          .boolean()
+          .optional()
+          .describe("Include text content (for get_pages, default true)"),
+        getScreenshots: z
+          .boolean()
+          .optional()
+          .describe(
+            "Include page screenshots as PNG images (for get_pages, default false)",
+          ),
       },
     },
     async ({
@@ -957,6 +975,9 @@ Stamp labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED.`,
       color,
       content,
       fields,
+      intervals,
+      getText,
+      getScreenshots,
     }): Promise<CallToolResult> => {
       let description: string;
       switch (action) {
@@ -1124,6 +1145,88 @@ Stamp labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED.`,
           enqueueCommand(uuid, { type: "fill_form", fields });
           description = `fill ${fields.length} form field(s)`;
           break;
+        case "get_pages": {
+          const resolvedIntervals = intervals ?? [{}];
+          const resolvedGetText = getText ?? true;
+          const resolvedGetScreenshots = getScreenshots ?? false;
+          if (!resolvedGetText && !resolvedGetScreenshots) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "get_pages: at least one of getText or getScreenshots must be true",
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const requestId = randomUUID();
+
+          // Enqueue command for client to process offscreen
+          enqueueCommand(uuid, {
+            type: "get_pages",
+            requestId,
+            intervals: resolvedIntervals,
+            getText: resolvedGetText,
+            getScreenshots: resolvedGetScreenshots,
+          });
+
+          // Wait for client to render and submit results (unlike other actions,
+          // get_pages returns page content directly instead of just "Queued")
+          let pageData: PageDataEntry[];
+          try {
+            pageData = await new Promise<PageDataEntry[]>((resolve, reject) => {
+              const timer = setTimeout(() => {
+                pendingPageRequests.delete(requestId);
+                reject(new Error("Timeout waiting for page data from viewer"));
+              }, GET_PAGES_TIMEOUT_MS);
+              pendingPageRequests.set(requestId, {
+                resolve,
+                reject,
+                timer,
+              });
+            });
+          } catch (err) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          // Format as MCP content blocks — interleaved text + image per page
+          const pageContent: Array<
+            | { type: "text"; text: string }
+            | { type: "image"; data: string; mimeType: string }
+          > = [];
+          for (const entry of pageData) {
+            if (entry.text != null) {
+              pageContent.push({
+                type: "text",
+                text: `--- Page ${entry.page} ---\n${entry.text}`,
+              });
+            }
+            if (entry.image) {
+              pageContent.push({
+                type: "image",
+                data: entry.image,
+                mimeType: "image/png",
+              });
+            }
+          }
+          if (pageContent.length === 0) {
+            pageContent.push({
+              type: "text",
+              text: "No page data returned",
+            });
+          }
+          return { content: pageContent };
+        }
         default:
           return {
             content: [{ type: "text", text: `Unknown action: ${action}` }],
@@ -1133,114 +1236,6 @@ Stamp labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED.`,
       return {
         content: [{ type: "text", text: `Queued: ${description}` }],
       };
-    },
-  );
-
-  // Tool: get_pages - Get text and/or screenshots from pages (offscreen, no navigation)
-  server.registerTool(
-    "get_pages",
-    {
-      title: "Get PDF Pages",
-      description: `Get text content and/or screenshots from specific pages without navigating the viewer.
-Pages are specified as intervals with optional start/end (1-indexed). Omit start for beginning, omit end for end of document.
-Examples: [{start:1, end:5}] for pages 1-5, [{}] for all pages, [{start:3, end:3}] for just page 3, [{start:10}] for page 10 onward.
-Max 20 pages per request. Does not affect the user's current view.`,
-      inputSchema: {
-        viewUUID: z
-          .string()
-          .describe("The viewUUID of the PDF viewer (from display_pdf result)"),
-        intervals: z
-          .array(PageInterval)
-          .min(1)
-          .default([{}])
-          .describe(
-            "Page ranges. Each has optional start/end. [{}] = all pages.",
-          ),
-        getText: z
-          .boolean()
-          .default(true)
-          .describe("Include text content for each page"),
-        getScreenshots: z
-          .boolean()
-          .default(false)
-          .describe("Include page screenshots (PNG images)"),
-      },
-    },
-    async ({
-      viewUUID: uuid,
-      intervals,
-      getText,
-      getScreenshots,
-    }): Promise<CallToolResult> => {
-      if (!getText && !getScreenshots) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "At least one of getText or getScreenshots must be true",
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      const requestId = randomUUID();
-
-      // Enqueue command for client to process offscreen
-      enqueueCommand(uuid, {
-        type: "get_pages",
-        requestId,
-        intervals,
-        getText,
-        getScreenshots,
-      });
-
-      // Wait for client to render and submit results
-      let pageData: PageDataEntry[];
-      try {
-        pageData = await new Promise<PageDataEntry[]>((resolve, reject) => {
-          const timer = setTimeout(() => {
-            pendingPageRequests.delete(requestId);
-            reject(new Error("Timeout waiting for page data from viewer"));
-          }, GET_PAGES_TIMEOUT_MS);
-          pendingPageRequests.set(requestId, { resolve, reject, timer });
-        });
-      } catch (err) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Error: ${err instanceof Error ? err.message : String(err)}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      // Format as MCP content blocks — interleaved text + image per page
-      const content: Array<
-        | { type: "text"; text: string }
-        | { type: "image"; data: string; mimeType: string }
-      > = [];
-      for (const entry of pageData) {
-        if (entry.text != null) {
-          content.push({
-            type: "text",
-            text: `--- Page ${entry.page} ---\n${entry.text}`,
-          });
-        }
-        if (entry.image) {
-          content.push({
-            type: "image",
-            data: entry.image,
-            mimeType: "image/png",
-          });
-        }
-      }
-      if (content.length === 0) {
-        content.push({ type: "text", text: "No page data returned" });
-      }
-      return { content };
     },
   );
 
