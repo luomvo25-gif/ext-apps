@@ -293,12 +293,16 @@ const pollWaiters = new Map<string, () => void>();
 /** Valid form field names per viewer UUID (populated during display_pdf) */
 const viewFieldNames = new Map<string, Set<string>>();
 
+/** Detailed form field info per viewer UUID (populated during display_pdf) */
+const viewFieldInfo = new Map<string, FormFieldInfo[]>();
+
 function pruneStaleQueues(): void {
   const now = Date.now();
   for (const [uuid, entry] of commandQueues) {
     if (now - entry.lastActivity > COMMAND_TTL_MS) {
       commandQueues.delete(uuid);
       viewFieldNames.delete(uuid);
+      viewFieldInfo.delete(uuid);
     }
   }
   // Clean up empty queues with no active pollers
@@ -738,6 +742,81 @@ interface PdfJsFieldObject {
   items?: Array<{ exportValue: string; displayValue: string }>;
 }
 
+/** Detailed info about a form field, including its location on the page. */
+interface FormFieldInfo {
+  name: string;
+  type: string;
+  page: number;
+  label?: string;
+  /** Bounding box in model coordinates (top-left origin) */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Extract detailed form field info (name, type, page, bounding box, label)
+ * from a PDF. Bounding boxes are converted to model coordinates (top-left origin).
+ */
+async function extractFormFieldInfo(
+  url: string,
+  readRange: (
+    url: string,
+    offset: number,
+    byteCount: number,
+  ) => Promise<{ data: Uint8Array; totalBytes: number }>,
+): Promise<FormFieldInfo[]> {
+  const { totalBytes } = await readRange(url, 0, 1);
+  const { data } = await readRange(url, 0, totalBytes);
+
+  const loadingTask = getDocument({ data });
+  const pdfDoc = await loadingTask.promise;
+
+  const fields: FormFieldInfo[] = [];
+  try {
+    for (let i = 1; i <= pdfDoc.numPages; i++) {
+      const page = await pdfDoc.getPage(i);
+      const pageHeight = page.getViewport({ scale: 1.0 }).height;
+      const annotations = await page.getAnnotations();
+      for (const ann of annotations) {
+        // Only include form widgets (annotationType 20)
+        if (ann.annotationType !== 20) continue;
+        if (!ann.rect) continue;
+
+        const fieldName = ann.fieldName || "";
+        const fieldType = ann.fieldType || "unknown";
+
+        // PDF rect is [x1, y1, x2, y2] in bottom-left origin
+        const x1 = Math.min(ann.rect[0], ann.rect[2]);
+        const y1 = Math.min(ann.rect[1], ann.rect[3]);
+        const x2 = Math.max(ann.rect[0], ann.rect[2]);
+        const y2 = Math.max(ann.rect[1], ann.rect[3]);
+        const width = x2 - x1;
+        const height = y2 - y1;
+
+        // Convert to model coords (top-left origin): modelY = pageHeight - pdfY - height
+        const modelY = pageHeight - y2;
+
+        fields.push({
+          name: fieldName,
+          type: fieldType,
+          page: i,
+          x: Math.round(x1),
+          y: Math.round(modelY),
+          width: Math.round(width),
+          height: Math.round(height),
+          ...(ann.alternativeText ? { label: ann.alternativeText } : undefined),
+        });
+      }
+    }
+  } finally {
+    pdfDoc.destroy();
+  }
+
+  return fields;
+}
+
 async function extractFormSchema(
   url: string,
   readRange: (
@@ -1056,6 +1135,24 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
         viewFieldNames.set(uuid, new Set(Object.keys(formSchema.properties)));
       }
 
+      // Extract detailed form field info (page, bounding box, label)
+      let fieldInfo: FormFieldInfo[] = [];
+      try {
+        fieldInfo = await extractFormFieldInfo(normalized, readPdfRange);
+        if (fieldInfo.length > 0) {
+          viewFieldInfo.set(uuid, fieldInfo);
+          // Also populate viewFieldNames from field info if not already set
+          if (!viewFieldNames.has(uuid)) {
+            viewFieldNames.set(
+              uuid,
+              new Set(fieldInfo.map((f) => f.name).filter(Boolean)),
+            );
+          }
+        }
+      } catch {
+        // Non-fatal
+      }
+
       // Elicit form field values if requested and client supports it
       let formFieldValues: Record<string, string | boolean> | undefined;
       let elicitResult: ElicitResult | undefined;
@@ -1118,13 +1215,43 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
         });
       }
 
-      // Include available form field names so the model knows what fill_form accepts
-      const fieldNames = viewFieldNames.get(uuid);
-      if (fieldNames && fieldNames.size > 0) {
-        contentParts.push({
-          type: "text",
-          text: `\nForm fields available for fill_form: ${[...fieldNames].join(", ")}`,
-        });
+      // Include detailed form field info so the model can locate and fill fields
+      if (fieldInfo.length > 0) {
+        // Group by page
+        const byPage = new Map<number, FormFieldInfo[]>();
+        for (const f of fieldInfo) {
+          let list = byPage.get(f.page);
+          if (!list) {
+            list = [];
+            byPage.set(f.page, list);
+          }
+          list.push(f);
+        }
+        const lines: string[] = [
+          `\nForm fields (${fieldInfo.length}) — use fill_form with {name, value}:`,
+        ];
+        for (const [pg, fields] of [...byPage.entries()].sort(
+          (a, b) => a[0] - b[0],
+        )) {
+          lines.push(`  Page ${pg}:`);
+          for (const f of fields) {
+            const label = f.label ? ` "${f.label}"` : "";
+            const nameStr = f.name || "(unnamed)";
+            lines.push(
+              `    ${nameStr}${label} [${f.type}] at (${f.x},${f.y}) ${f.width}×${f.height}`,
+            );
+          }
+        }
+        contentParts.push({ type: "text", text: lines.join("\n") });
+      } else {
+        // Fallback to simple field name listing if detailed info unavailable
+        const fieldNames = viewFieldNames.get(uuid);
+        if (fieldNames && fieldNames.size > 0) {
+          contentParts.push({
+            type: "text",
+            text: `\nForm fields available for fill_form: ${[...fieldNames].join(", ")}`,
+          });
+        }
       }
 
       return {
