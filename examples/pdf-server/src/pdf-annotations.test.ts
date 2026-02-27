@@ -17,7 +17,7 @@ import {
   type PdfAnnotationDef,
   type AnnotationDiff,
 } from "./pdf-annotations";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, PDFDict, PDFName, PDFArray, PDFNumber } from "pdf-lib";
 
 // =============================================================================
 // Diff Model
@@ -697,6 +697,47 @@ describe("buildAnnotatedPdfBytes", () => {
     expect(annots).toBeDefined();
   });
 
+  it("saves rectangle stroke and fill colors in PDF dict", async () => {
+    const annotations: PdfAnnotationDef[] = [
+      {
+        type: "rectangle",
+        id: "r1",
+        page: 1,
+        x: 50,
+        y: 300,
+        width: 200,
+        height: 100,
+        color: "#ff0000",
+        fillColor: "#00ff00",
+      },
+    ];
+
+    const result = await buildAnnotatedPdfBytes(
+      blankPdfBytes,
+      annotations,
+      new Map(),
+    );
+    const doc = await PDFDocument.load(result);
+    const page = doc.getPages()[0];
+    const annots = page.node.Annots()!;
+    const annotRef = annots.get(annots.size() - 1);
+    const annotDict = doc.context.lookup(annotRef) as PDFDict;
+
+    // Check /C (stroke color) = [1, 0, 0] for #ff0000
+    const cArr = annotDict.get(PDFName.of("C")) as PDFArray;
+    expect(cArr).toBeDefined();
+    expect((cArr.get(0) as PDFNumber).value()).toBe(1); // r
+    expect((cArr.get(1) as PDFNumber).value()).toBe(0); // g
+    expect((cArr.get(2) as PDFNumber).value()).toBe(0); // b
+
+    // Check /IC (fill color) = [0, 1, 0] for #00ff00
+    const icArr = annotDict.get(PDFName.of("IC")) as PDFArray;
+    expect(icArr).toBeDefined();
+    expect((icArr.get(0) as PDFNumber).value()).toBe(0); // r
+    expect((icArr.get(1) as PDFNumber).value()).toBe(1); // g
+    expect((icArr.get(2) as PDFNumber).value()).toBe(0); // b
+  });
+
   it("adds freetext annotation to PDF", async () => {
     const annotations: PdfAnnotationDef[] = [
       {
@@ -742,6 +783,79 @@ describe("buildAnnotatedPdfBytes", () => {
     const doc = await PDFDocument.load(result);
     const annots = doc.getPages()[0].node.Annots();
     expect(annots).toBeDefined();
+  });
+
+  it("saves stamp color in both /C and appearance stream", async () => {
+    const annotations: PdfAnnotationDef[] = [
+      {
+        type: "stamp",
+        id: "s1",
+        page: 1,
+        x: 200,
+        y: 400,
+        label: "OK",
+        color: "#00ff00",
+      },
+    ];
+
+    const result = await buildAnnotatedPdfBytes(
+      blankPdfBytes,
+      annotations,
+      new Map(),
+    );
+    const doc = await PDFDocument.load(result);
+    const annots = doc.getPages()[0].node.Annots()!;
+    const annotRef = annots.get(annots.size() - 1);
+    const annotDict = doc.context.lookup(annotRef) as PDFDict;
+
+    // Check /C color
+    const cArr = annotDict.get(PDFName.of("C")) as PDFArray;
+    expect(cArr).toBeDefined();
+    expect((cArr.get(0) as PDFNumber).value()).toBe(0);
+    expect((cArr.get(1) as PDFNumber).value()).toBe(1);
+    expect((cArr.get(2) as PDFNumber).value()).toBe(0);
+
+    // Check appearance stream exists and contains the color
+    const ap = annotDict.get(PDFName.of("AP")) as PDFDict;
+    expect(ap).toBeDefined();
+    const nRef = ap.get(PDFName.of("N"));
+    expect(nRef).toBeDefined();
+  });
+
+  it("saves stamp rotation via appearance stream matrix", async () => {
+    const annotations: PdfAnnotationDef[] = [
+      {
+        type: "stamp",
+        id: "s1",
+        page: 1,
+        x: 200,
+        y: 400,
+        label: "TILTED",
+        color: "#cc0000",
+        rotation: 45,
+      },
+    ];
+
+    const result = await buildAnnotatedPdfBytes(
+      blankPdfBytes,
+      annotations,
+      new Map(),
+    );
+    const doc = await PDFDocument.load(result);
+    const annots = doc.getPages()[0].node.Annots()!;
+    const annotRef = annots.get(annots.size() - 1);
+    const annotDict = doc.context.lookup(annotRef) as PDFDict;
+
+    // Verify the appearance stream has a /Matrix with rotation
+    const ap = annotDict.get(PDFName.of("AP")) as PDFDict;
+    expect(ap).toBeDefined();
+    const nRef = ap.get(PDFName.of("N"));
+    const apStream = doc.context.lookup(nRef) as any;
+    expect(apStream).toBeDefined();
+    // The stream's dict should have a Matrix entry for rotation
+    const streamDict = apStream.dict || apStream;
+    const matrix = streamDict.get(PDFName.of("Matrix"));
+    expect(matrix).toBeDefined();
   });
 
   it("adds multiple annotations of different types", async () => {

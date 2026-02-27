@@ -628,6 +628,21 @@ export async function addAnnotationDicts(
           `ET`,
         ].join("\n");
 
+        // Compute rotation matrix if specified
+        let rotationMatrix: number[] | undefined;
+        if (def.rotation) {
+          const rad = (def.rotation * Math.PI) / 180;
+          const cos = Math.cos(rad);
+          const sin = Math.sin(rad);
+          // Rotation matrix around the center of the bounding box
+          const cx = apRectW / 2;
+          const cy = apRectH / 2;
+          // Translate to origin, rotate, translate back: [cos sin -sin cos tx ty]
+          const tx = cx - cos * cx + sin * cy;
+          const ty = cy - sin * cx - cos * cy;
+          rotationMatrix = [cos, sin, -sin, cos, tx, ty];
+        }
+
         // Create the appearance stream
         const apStream = context.flateStream(streamContent, {
           Type: "XObject",
@@ -636,6 +651,7 @@ export async function addAnnotationDicts(
           Resources: {
             Font: { F1: font.ref },
           },
+          ...(rotationMatrix ? { Matrix: rotationMatrix } : {}),
         });
         const apRef = context.register(apStream);
 
@@ -643,14 +659,6 @@ export async function addAnnotationDicts(
         const apDict = PDFDict.withContext(context);
         apDict.set(PDFName.of("N"), apRef);
         dict.set(PDFName.of("AP"), apDict);
-
-        // Apply rotation if specified
-        if (def.rotation) {
-          // PDF rotation for annotations is not directly supported via /Rotate
-          // on the annotation dict in the same way. We handle it through the
-          // appearance stream matrix instead. For simplicity, we skip rotation
-          // in the annotation dict since appearance streams handle display.
-        }
         break;
       }
     }
