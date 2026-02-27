@@ -1965,8 +1965,10 @@ function getAnnotationY(def: PdfAnnotationDef): number {
   return 0;
 }
 
-/** Track which accordion section is open (e.g. "page-3" or "formFields"). */
+/** Track which accordion section is open (e.g. "page-3" or "formFields"). null = all collapsed. */
 let openAccordionSection: string | null = null;
+/** Whether the user has ever interacted with accordion sections (prevents auto-open after explicit collapse). */
+let accordionUserInteracted = false;
 
 /** Which corner the floating panel is anchored to. */
 type PanelCorner = "top-right" | "top-left" | "bottom-right" | "bottom-left";
@@ -1995,8 +1997,8 @@ function renderAnnotationPanel(): void {
 
   annotationsPanelListEl.innerHTML = "";
 
-  // Auto-open section for current page if none is open
-  if (openAccordionSection === null) {
+  // Auto-open section for current page only on first render (before user interaction)
+  if (openAccordionSection === null && !accordionUserInteracted) {
     if (byPage.has(currentPage)) {
       openAccordionSection = `page-${currentPage}`;
     } else if (sortedPages.length > 0) {
@@ -2064,6 +2066,7 @@ function appendAccordionSection(
   header.appendChild(chevron);
 
   header.addEventListener("click", () => {
+    accordionUserInteracted = true;
     openAccordionSection =
       openAccordionSection === sectionKey ? null : sectionKey;
     renderAnnotationPanel();
