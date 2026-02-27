@@ -371,6 +371,7 @@ describe("defaultColor", () => {
       "rectangle",
       "freetext",
       "stamp",
+      "image",
     ];
     const colors = types.map(defaultColor);
     // At minimum underline and strikethrough share the same color
@@ -1163,5 +1164,225 @@ describe("coordinate conversion", () => {
     expect((converted as any).color).toBe("#ff0000");
     expect((converted as any).fillColor).toBe("#00ff00");
     expect((converted as any).rotation).toBe(45);
+  });
+
+  it("round-trips an image annotation", () => {
+    const original: PdfAnnotationDef = {
+      type: "image",
+      id: "img1",
+      page: 1,
+      x: 72,
+      y: 50,
+      width: 200,
+      height: 150,
+      imageData: "iVBORw0KGgo=",
+      mimeType: "image/png",
+    };
+    const converted = convertFromModelCoords(original, PAGE_HEIGHT);
+    const restored = convertToModelCoords(converted, PAGE_HEIGHT);
+    expect(restored).toEqual(original);
+  });
+
+  it("converts image y from model to PDF coords correctly", () => {
+    // Same as rectangle: y = pageHeight - y - height
+    const model: PdfAnnotationDef = {
+      type: "image",
+      id: "img1",
+      page: 1,
+      x: 72,
+      y: 50,
+      width: 200,
+      height: 100,
+    };
+    const pdf = convertFromModelCoords(model, PAGE_HEIGHT);
+    expect((pdf as any).y).toBe(642); // 792 - 50 - 100
+    expect((pdf as any).x).toBe(72);
+  });
+});
+
+// =============================================================================
+// Image Annotation PDF Creation
+// =============================================================================
+
+describe("image annotation PDF creation", () => {
+  let blankPdfBytes: Uint8Array;
+
+  beforeAll(async () => {
+    const doc = await PDFDocument.create();
+    doc.addPage([612, 792]);
+    blankPdfBytes = await doc.save();
+  });
+
+  // Create a minimal valid 1x1 PNG for testing
+  function createMinimalPng(): string {
+    // 1x1 red pixel PNG (minimal valid PNG)
+    const pngBytes = new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a, // PNG signature
+      0x00,
+      0x00,
+      0x00,
+      0x0d,
+      0x49,
+      0x48,
+      0x44,
+      0x52, // IHDR chunk
+      0x00,
+      0x00,
+      0x00,
+      0x01,
+      0x00,
+      0x00,
+      0x00,
+      0x01, // 1x1
+      0x08,
+      0x02,
+      0x00,
+      0x00,
+      0x00,
+      0x90,
+      0x77,
+      0x53,
+      0xde, // 8-bit RGB
+      0x00,
+      0x00,
+      0x00,
+      0x0c,
+      0x49,
+      0x44,
+      0x41,
+      0x54, // IDAT chunk
+      0x08,
+      0xd7,
+      0x63,
+      0xf8,
+      0xcf,
+      0xc0,
+      0x00,
+      0x00, // compressed data
+      0x00,
+      0x02,
+      0x00,
+      0x01,
+      0xe2,
+      0x21,
+      0xbc,
+      0x33, // CRC
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x49,
+      0x45,
+      0x4e,
+      0x44, // IEND chunk
+      0xae,
+      0x42,
+      0x60,
+      0x82,
+    ]);
+    return uint8ArrayToBase64(pngBytes);
+  }
+
+  it("adds image annotation as Stamp with appearance stream", async () => {
+    const pngData = createMinimalPng();
+    const annotations: PdfAnnotationDef[] = [
+      {
+        type: "image",
+        id: "img1",
+        page: 1,
+        x: 72,
+        y: 300,
+        width: 200,
+        height: 150,
+        imageData: pngData,
+        mimeType: "image/png",
+      },
+    ];
+
+    const result = await buildAnnotatedPdfBytes(
+      blankPdfBytes,
+      annotations,
+      new Map(),
+    );
+    const doc = await PDFDocument.load(result);
+    const page = doc.getPages()[0];
+    const annots = page.node.Annots();
+    expect(annots).toBeDefined();
+    expect(annots!.size()).toBeGreaterThanOrEqual(1);
+
+    // Verify it's a Stamp subtype
+    const annotRef = annots!.get(annots!.size() - 1);
+    const annotDict = doc.context.lookup(annotRef) as PDFDict;
+    expect(annotDict.get(PDFName.of("Subtype"))).toEqual(PDFName.of("Stamp"));
+
+    // Verify it has an appearance stream
+    const ap = annotDict.get(PDFName.of("AP")) as PDFDict;
+    expect(ap).toBeDefined();
+    expect(ap.get(PDFName.of("N"))).toBeDefined();
+  });
+
+  it("produces a valid re-loadable PDF with image annotation", async () => {
+    const pngData = createMinimalPng();
+    const annotations: PdfAnnotationDef[] = [
+      {
+        type: "image",
+        id: "img1",
+        page: 1,
+        x: 72,
+        y: 300,
+        width: 200,
+        height: 150,
+        imageData: pngData,
+      },
+    ];
+
+    const bytes = await buildAnnotatedPdfBytes(
+      blankPdfBytes,
+      annotations,
+      new Map(),
+    );
+    // Should be able to load the result again
+    const doc = await PDFDocument.load(bytes);
+    expect(doc.getPageCount()).toBe(1);
+    // Should be able to save it again
+    const bytes2 = await doc.save();
+    expect(bytes2.length).toBeGreaterThan(0);
+  });
+
+  it("skips appearance stream when no imageData", async () => {
+    const annotations: PdfAnnotationDef[] = [
+      {
+        type: "image",
+        id: "img1",
+        page: 1,
+        x: 72,
+        y: 300,
+        width: 200,
+        height: 150,
+        imageUrl: "https://example.com/image.png",
+      },
+    ];
+
+    const result = await buildAnnotatedPdfBytes(
+      blankPdfBytes,
+      annotations,
+      new Map(),
+    );
+    const doc = await PDFDocument.load(result);
+    const page = doc.getPages()[0];
+    const annots = page.node.Annots();
+    expect(annots).toBeDefined();
+
+    // No AP dict since no imageData
+    const annotRef = annots!.get(annots!.size() - 1);
+    const annotDict = doc.context.lookup(annotRef) as PDFDict;
+    expect(annotDict.get(PDFName.of("AP"))).toBeUndefined();
   });
 });

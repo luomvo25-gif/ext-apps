@@ -111,6 +111,18 @@ export interface StampAnnotation extends AnnotationBase {
   rotation?: number;
 }
 
+export interface ImageAnnotation extends AnnotationBase {
+  type: "image";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  imageData?: string;
+  imageUrl?: string;
+  mimeType?: string;
+  rotation?: number;
+}
+
 export type PdfAnnotationDef =
   | HighlightAnnotation
   | UnderlineAnnotation
@@ -120,7 +132,8 @@ export type PdfAnnotationDef =
   | CircleAnnotation
   | LineAnnotation
   | FreetextAnnotation
-  | StampAnnotation;
+  | StampAnnotation
+  | ImageAnnotation;
 
 // =============================================================================
 // Coordinate Conversion (model ↔ internal PDF coords)
@@ -153,6 +166,7 @@ export function convertFromModelCoords(
       return { ...def, y: pageHeight - def.y };
     case "rectangle":
     case "circle":
+    case "image":
       return { ...def, y: pageHeight - def.y - def.height };
     case "line":
       return {
@@ -341,6 +355,8 @@ export function defaultColor(type: PdfAnnotationDef["type"]): string {
       return "#333333";
     case "stamp":
       return "#cc0000";
+    case "image":
+      return "#00000000";
   }
 }
 
@@ -429,6 +445,23 @@ function boundingBox(rects: Rect[]): {
     maxY = Math.max(maxY, r.y + r.height);
   }
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
+/**
+ * Detect image MIME type from magic bytes.
+ */
+function detectImageMimeType(bytes: Uint8Array): "image/png" | "image/jpeg" {
+  // PNG magic: 0x89 0x50 0x4E 0x47
+  if (
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  ) {
+    return "image/png";
+  }
+  // JPEG magic: 0xFF 0xD8
+  return "image/jpeg";
 }
 
 /**
@@ -659,6 +692,68 @@ export async function addAnnotationDicts(
         const apDict = PDFDict.withContext(context);
         apDict.set(PDFName.of("N"), apRef);
         dict.set(PDFName.of("AP"), apDict);
+        break;
+      }
+
+      case "image": {
+        dict.set(PDFName.of("Subtype"), PDFName.of("Stamp"));
+        dict.set(
+          PDFName.of("Rect"),
+          makePdfRect(context, def.x, def.y, def.width, def.height),
+        );
+        dict.set(PDFName.of("Name"), PDFName.of("Image"));
+
+        if (def.imageData) {
+          // Detect mime type from magic bytes or use provided mimeType
+          const imgBytes = base64ToUint8Array(def.imageData);
+          const mime = def.mimeType || detectImageMimeType(imgBytes);
+          const embeddedImage =
+            mime === "image/jpeg"
+              ? await pdfDoc.embedJpg(imgBytes)
+              : await pdfDoc.embedPng(imgBytes);
+
+          const imgW = def.width;
+          const imgH = def.height;
+
+          // Build appearance stream that draws the image
+          const streamContent = `q ${imgW} 0 0 ${imgH} 0 0 cm /Img Do Q`;
+
+          // Compute rotation matrix if specified
+          let rotationMatrix: number[] | undefined;
+          if (def.rotation) {
+            const rad = (def.rotation * Math.PI) / 180;
+            const cos = Math.cos(rad);
+            const sin = Math.sin(rad);
+            const cx = imgW / 2;
+            const cy = imgH / 2;
+            const tx = cx - cos * cx + sin * cy;
+            const ty = cy - sin * cx - cos * cy;
+            rotationMatrix = [cos, sin, -sin, cos, tx, ty];
+          }
+
+          // Create Resources dict with XObject containing the image
+          const xObjDict = PDFDict.withContext(context);
+          xObjDict.set(PDFName.of("Img"), embeddedImage.ref);
+          const resDict = PDFDict.withContext(context);
+          resDict.set(PDFName.of("XObject"), xObjDict);
+
+          const apStream = context.flateStream(streamContent, {
+            Type: "XObject",
+            Subtype: "Form",
+            BBox: [0, 0, imgW, imgH],
+            ...(rotationMatrix ? { Matrix: rotationMatrix } : {}),
+          });
+
+          // Attach Resources to the stream dict
+          const apStreamDict = (apStream as any).dict || apStream;
+          apStreamDict.set(PDFName.of("Resources"), resDict);
+
+          const apRef = context.register(apStream);
+
+          const apDict = PDFDict.withContext(context);
+          apDict.set(PDFName.of("N"), apRef);
+          dict.set(PDFName.of("AP"), apDict);
+        }
         break;
       }
     }

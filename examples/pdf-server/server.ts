@@ -174,6 +174,24 @@ const StampAnnotation = AnnotationBase.extend({
   rotation: z.number().optional(),
 });
 
+const ImageAnnotation = AnnotationBase.extend({
+  type: z.literal("image"),
+  x: z.number().optional(),
+  y: z.number().optional(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+  imageData: z
+    .string()
+    .optional()
+    .describe("Base64-encoded PNG or JPEG image data (no data: prefix)"),
+  imageUrl: z.string().optional().describe("URL or file path to the image"),
+  mimeType: z
+    .string()
+    .optional()
+    .describe("image/png or image/jpeg (auto-detected if omitted)"),
+  rotation: z.number().optional(),
+});
+
 const PdfAnnotationDef = z.discriminatedUnion("type", [
   HighlightAnnotation,
   UnderlineAnnotation,
@@ -184,6 +202,7 @@ const PdfAnnotationDef = z.discriminatedUnion("type", [
   LineAnnotation,
   FreetextAnnotation,
   StampAnnotation,
+  ImageAnnotation,
 ]);
 
 /** Partial annotation update — id + type required, rest optional */
@@ -197,6 +216,7 @@ const PdfAnnotationUpdate = z.union([
   StampAnnotation.partial().required({ id: true, type: true }),
   CircleAnnotation.partial().required({ id: true, type: true }),
   LineAnnotation.partial().required({ id: true, type: true }),
+  ImageAnnotation.partial().required({ id: true, type: true }),
 ]);
 
 const FormField = z.object({
@@ -1365,6 +1385,103 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
     | { type: "text"; text: string }
     | { type: "image"; data: string; mimeType: string };
 
+  /**
+   * Resolve an image annotation: fetch imageUrl → imageData if needed,
+   * auto-detect dimensions, and set defaults for x/y.
+   */
+  async function resolveImageAnnotation(
+    ann: Record<string, any>,
+  ): Promise<void> {
+    // Fetch image data from URL if no imageData provided
+    if (!ann.imageData && ann.imageUrl) {
+      try {
+        let imgBytes: Uint8Array;
+        const url = ann.imageUrl as string;
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          imgBytes = new Uint8Array(await resp.arrayBuffer());
+        } else {
+          // Treat as file path
+          imgBytes = await fs.promises.readFile(url);
+        }
+        ann.imageData = Buffer.from(imgBytes).toString("base64");
+      } catch (err) {
+        console.error(`Failed to fetch image from ${ann.imageUrl}:`, err);
+      }
+    }
+
+    // Auto-detect mimeType from magic bytes if not set
+    if (ann.imageData && !ann.mimeType) {
+      const bytes = Buffer.from(ann.imageData, "base64");
+      if (
+        bytes[0] === 0x89 &&
+        bytes[1] === 0x50 &&
+        bytes[2] === 0x4e &&
+        bytes[3] === 0x47
+      ) {
+        ann.mimeType = "image/png";
+      } else {
+        ann.mimeType = "image/jpeg";
+      }
+    }
+
+    // Auto-detect dimensions from image if not specified
+    if (ann.imageData && (ann.width == null || ann.height == null)) {
+      const dims = detectImageDimensions(Buffer.from(ann.imageData, "base64"));
+      if (dims) {
+        const maxWidth = 200; // default max width in PDF points
+        const aspectRatio = dims.height / dims.width;
+        ann.width = ann.width ?? Math.min(dims.width, maxWidth);
+        ann.height = ann.height ?? ann.width * aspectRatio;
+      } else {
+        ann.width = ann.width ?? 200;
+        ann.height = ann.height ?? 200;
+      }
+    }
+
+    // Default position if not specified
+    ann.x = ann.x ?? 72;
+    ann.y = ann.y ?? 72;
+  }
+
+  /**
+   * Detect image dimensions from PNG or JPEG bytes.
+   */
+  function detectImageDimensions(
+    bytes: Buffer,
+  ): { width: number; height: number } | null {
+    // PNG: width at offset 16 (4 bytes BE), height at offset 20 (4 bytes BE)
+    if (
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47
+    ) {
+      if (bytes.length >= 24) {
+        const width = bytes.readUInt32BE(16);
+        const height = bytes.readUInt32BE(20);
+        return { width, height };
+      }
+    }
+    // JPEG: scan for SOF0/SOF2 markers (0xFF 0xC0 / 0xFF 0xC2)
+    if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+      let offset = 2;
+      while (offset < bytes.length - 8) {
+        if (bytes[offset] !== 0xff) break;
+        const marker = bytes[offset + 1];
+        if (marker === 0xc0 || marker === 0xc2) {
+          const height = bytes.readUInt16BE(offset + 5);
+          const width = bytes.readUInt16BE(offset + 7);
+          return { width, height };
+        }
+        const segLen = bytes.readUInt16BE(offset + 2);
+        offset += 2 + segLen;
+      }
+    }
+    return null;
+  }
+
   /** Process a single interact command. Returns content parts and an isError flag. */
   async function processInteractCommand(
     uuid: string,
@@ -1447,6 +1564,12 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
             ],
             isError: true,
           };
+        // Resolve image annotations: fetch imageUrl → imageData, auto-detect dimensions
+        for (const ann of annotations) {
+          if ((ann as any).type === "image") {
+            await resolveImageAnnotation(ann as any);
+          }
+        }
         enqueueCommand(uuid, {
           type: "add_annotations",
           annotations: annotations as z.infer<typeof PdfAnnotationDef>[],
@@ -1681,6 +1804,7 @@ Annotation types:
 • rectangle: x, y, width, height, color?, fillColor?, rotation? • circle: x, y, width, height, color?, fillColor?
 • line: x1, y1, x2, y2, color? • freetext: x, y, content, fontSize?, color?
 • stamp: x, y, label (any text, e.g. APPROVED, DRAFT, CONFIDENTIAL), color?, rotation?
+• image: imageUrl or imageData (base64 PNG/JPEG), x?, y?, width?, height?, mimeType?, rotation? — places an image on the page
 
 TIP: For text annotations, prefer highlight_text (auto-finds text) over manual rects.
 

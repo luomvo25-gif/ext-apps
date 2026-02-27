@@ -24,6 +24,7 @@ import {
   type CircleAnnotation,
   type LineAnnotation,
   type StampAnnotation,
+  type ImageAnnotation,
   type NoteAnnotation,
   type FreetextAnnotation,
   serializeDiff,
@@ -71,6 +72,8 @@ interface TrackedAnnotation {
 // Annotation state
 const annotationMap = new Map<string, TrackedAnnotation>();
 const formFieldValues = new Map<string, string | boolean>();
+/** Cache loaded HTMLImageElement instances by annotation ID for canvas painting. */
+const imageCache = new Map<string, HTMLImageElement>();
 
 /** Annotations imported from the PDF file (baseline for diff computation). */
 let pdfBaselineAnnotations: PdfAnnotationDef[] = [];
@@ -1025,9 +1028,9 @@ function syncSidebarSelection(): void {
 }
 
 /** Types that support resize handles (need width/height). */
-const RESIZABLE_TYPES = new Set<string>(["rectangle", "circle"]);
+const RESIZABLE_TYPES = new Set<string>(["rectangle", "circle", "image"]);
 /** Types that support rotation. */
-const ROTATABLE_TYPES = new Set<string>(["rectangle", "stamp"]);
+const ROTATABLE_TYPES = new Set<string>(["rectangle", "stamp", "image"]);
 
 function showHandles(tracked: TrackedAnnotation): void {
   const def = tracked.def;
@@ -1067,6 +1070,7 @@ const DRAGGABLE_TYPES = new Set<string>([
   "freetext",
   "stamp",
   "note",
+  "image",
 ]);
 
 function setupAnnotationInteraction(
@@ -1281,7 +1285,10 @@ function setupRotateHandle(
     e.stopPropagation();
     e.preventDefault();
 
-    const def = tracked.def as StampAnnotation | RectangleAnnotation;
+    const def = tracked.def as
+      | StampAnnotation
+      | RectangleAnnotation
+      | ImageAnnotation;
     const beforeDef = { ...def };
     const el = tracked.elements[0];
     const rect = el.getBoundingClientRect();
@@ -1500,6 +1507,47 @@ function paintAnnotationsOnCanvas(
         ctx.restore();
         break;
       }
+
+      case "image": {
+        const s = pdfRectToScreen(
+          { x: def.x, y: def.y, width: def.width, height: def.height },
+          viewport,
+        );
+        // Try to draw from cache
+        const cachedImg = imageCache.get(def.id);
+        if (cachedImg) {
+          ctx.save();
+          if (def.rotation) {
+            const cx = s.left + s.width / 2;
+            const cy = s.top + s.height / 2;
+            ctx.translate(cx, cy);
+            ctx.rotate((def.rotation * Math.PI) / 180);
+            ctx.translate(-cx, -cy);
+          }
+          ctx.drawImage(cachedImg, s.left, s.top, s.width, s.height);
+          ctx.restore();
+        } else {
+          // Load image asynchronously into cache for next paint
+          const src = def.imageData
+            ? `data:${def.mimeType || "image/png"};base64,${def.imageData}`
+            : def.imageUrl;
+          if (src) {
+            const img = new Image();
+            img.onload = () => {
+              imageCache.set(def.id, img);
+            };
+            img.src = src;
+          }
+          // Draw placeholder border
+          ctx.save();
+          ctx.strokeStyle = "#999";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 4]);
+          ctx.strokeRect(s.left, s.top, s.width, s.height);
+          ctx.restore();
+        }
+        break;
+      }
     }
   }
 }
@@ -1588,6 +1636,8 @@ function renderAnnotation(
       return [renderCircleAnnotation(def, viewport)];
     case "line":
       return [renderLineAnnotation(def, viewport)];
+    case "image":
+      return [renderImageAnnotation(def, viewport)];
   }
 }
 
@@ -1740,6 +1790,49 @@ function renderLineAnnotation(
   el.style.transform = `rotate(${angle}rad)`;
   el.style.transformOrigin = "0 0";
   if (def.color) el.style.borderColor = def.color;
+  return el;
+}
+
+function renderImageAnnotation(
+  def: ImageAnnotation,
+  viewport: { width: number; height: number; scale: number },
+): HTMLElement {
+  const screen = pdfRectToScreen(
+    { x: def.x, y: def.y, width: def.width, height: def.height },
+    viewport,
+  );
+  const el = document.createElement("div");
+  el.className = "annotation-image";
+  el.style.left = `${screen.left}px`;
+  el.style.top = `${screen.top}px`;
+  el.style.width = `${screen.width}px`;
+  el.style.height = `${screen.height}px`;
+  el.style.position = "absolute";
+  if (def.rotation) {
+    el.style.transform = `rotate(${def.rotation}deg)`;
+    el.style.transformOrigin = "center center";
+  }
+
+  if (def.imageData) {
+    const mime = def.mimeType || "image/png";
+    const img = document.createElement("img");
+    img.src = `data:${mime};base64,${def.imageData}`;
+    img.style.width = "100%";
+    img.style.height = "100%";
+    img.style.objectFit = "contain";
+    img.style.pointerEvents = "none";
+    img.draggable = false;
+    el.appendChild(img);
+  } else if (def.imageUrl) {
+    const img = document.createElement("img");
+    img.src = def.imageUrl;
+    img.style.width = "100%";
+    img.style.height = "100%";
+    img.style.objectFit = "contain";
+    img.style.pointerEvents = "none";
+    img.draggable = false;
+    el.appendChild(img);
+  }
   return el;
 }
 
@@ -1981,6 +2074,8 @@ function getAnnotationLabel(def: PdfAnnotationDef): string {
       return "Circle";
     case "line":
       return "Line";
+    case "image":
+      return "Image";
   }
 }
 
@@ -1993,6 +2088,8 @@ function getAnnotationPreview(def: PdfAnnotationDef): string {
     case "highlight":
       return def.content || "";
     case "stamp":
+      return "";
+    case "image":
       return "";
     default:
       return "";
@@ -2020,6 +2117,8 @@ function getAnnotationColor(def: PdfAnnotationDef): string {
       return "#0066cc";
     case "line":
       return "#333";
+    case "image":
+      return "#999";
   }
 }
 
@@ -4462,4 +4561,90 @@ app.connect().then(() => {
   // Restore annotations early using toolInfo.id (available before tool result)
   restoreAnnotations();
   updateAnnotationsBadge();
+});
+
+// =============================================================================
+// Image Drag & Drop
+// =============================================================================
+
+const containerHtmlEl = canvasContainerEl as HTMLElement;
+containerHtmlEl.addEventListener("dragover", (e: DragEvent) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+});
+
+containerHtmlEl.addEventListener("drop", async (e: DragEvent) => {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!e.dataTransfer?.files.length) return;
+
+  for (const file of e.dataTransfer.files) {
+    if (!file.type.startsWith("image/")) continue;
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const dataUrl = reader.result as string;
+      // Strip the data:mime;base64, prefix
+      const base64 = dataUrl.split(",")[1];
+      const mimeType = file.type;
+
+      // Determine drop position in PDF coordinates
+      const containerRect = containerHtmlEl.getBoundingClientRect();
+      const dropX = e.clientX - containerRect.left;
+      const dropY = e.clientY - containerRect.top;
+      const pdfX = dropX / scale;
+
+      // Get natural image dimensions to determine aspect ratio
+      const img = new Image();
+      img.onload = () => {
+        const maxWidth = 200; // PDF points
+        const aspectRatio = img.naturalHeight / img.naturalWidth;
+        const width = Math.min(img.naturalWidth, maxWidth);
+        const height = width * aspectRatio;
+
+        // Convert screen drop point to PDF internal coords
+        // The drop Y is in screen space (top-left origin), convert to PDF space (bottom-left)
+        const pdfInternalY = (containerHtmlEl.clientHeight - dropY) / scale;
+
+        const id = `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const def: ImageAnnotation = {
+          type: "image",
+          id,
+          page: currentPage,
+          x: pdfX,
+          y: pdfInternalY,
+          width,
+          height,
+          imageData: base64,
+          mimeType,
+        };
+
+        // Downscale if base64 data is too large (> ~300KB)
+        if (base64.length > 400_000) {
+          const canvas = document.createElement("canvas");
+          const maxDim = 800;
+          let w = img.naturalWidth;
+          let h = img.naturalHeight;
+          if (w > maxDim || h > maxDim) {
+            const ratio = Math.min(maxDim / w, maxDim / h);
+            w = Math.round(w * ratio);
+            h = Math.round(h * ratio);
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d")!;
+          ctx.drawImage(img, 0, 0, w, h);
+          const quality = mimeType === "image/jpeg" ? 0.7 : undefined;
+          const downscaledUrl = canvas.toDataURL(mimeType, quality);
+          def.imageData = downscaledUrl.split(",")[1];
+        }
+
+        addAnnotation(def);
+        persistAnnotations();
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  }
 });
