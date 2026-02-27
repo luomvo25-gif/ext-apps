@@ -20,6 +20,8 @@
             width: 100%;
             height: 100%;
         }
+
+        /* --- Toolbar Buttons (top-right) --- */
         .toolbar-btn {
             position: absolute;
             top: 10px;
@@ -34,22 +36,35 @@
             align-items: center;
             justify-content: center;
             transition: background 0.2s;
+            color: white;
         }
-        .toolbar-btn:hover {
-            background: rgba(0, 0, 0, 0.85);
-        }
-        .toolbar-btn svg {
-            width: 20px;
-            height: 20px;
-            fill: white;
-        }
-        #fullscreen-btn {
-            right: 10px;
-        }
-        #copy-btn {
-            right: 52px;
-        }
+        .toolbar-btn:hover { background: rgba(0, 0, 0, 0.85); }
+        .toolbar-btn svg { width: 20px; height: 20px; fill: currentColor; }
+        #fullscreen-btn { right: 10px; }
+        #copy-btn { right: 52px; }
         #copy-btn.copied svg { fill: #4ade80; }
+        #panel-btn { right: 94px; }
+        #panel-btn.active { background: rgba(50, 100, 200, 0.9); }
+
+        /* Badge on panel button */
+        #panel-badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            min-width: 16px;
+            height: 16px;
+            padding: 0 4px;
+            border-radius: 8px;
+            background: #e74c3c;
+            color: white;
+            font-size: 10px;
+            font-weight: 600;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+        }
+
         #loading {
             position: absolute;
             top: 50%;
@@ -62,20 +77,231 @@
             font-size: 16px;
             z-index: 1001;
         }
+
+        /* --- Annotation Panel (floating, draggable) --- */
+        .ann-panel {
+            position: absolute;
+            top: 56px;
+            right: 10px;
+            width: 260px;
+            min-width: 180px;
+            max-width: 50vw;
+            max-height: calc(100% - 70px);
+            background: rgba(20, 20, 20, 0.92);
+            color: #eee;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+            z-index: 999;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            transition: top 0.15s ease, left 0.15s ease, right 0.15s ease, bottom 0.15s ease;
+            backdrop-filter: blur(4px);
+        }
+        .ann-panel.dragging { transition: none; }
+
+        .ann-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            cursor: grab;
+            user-select: none;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .ann-panel.dragging .ann-panel-header { cursor: grabbing; }
+
+        .ann-panel-header-actions { display: flex; gap: 2px; }
+        .ann-icon-btn {
+            width: 22px;
+            height: 22px;
+            padding: 0;
+            border: none;
+            background: transparent;
+            color: #aaa;
+            cursor: pointer;
+            border-radius: 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .ann-icon-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+        .ann-icon-btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; }
+        .ann-icon-btn:disabled { opacity: 0.3; cursor: default; }
+        .ann-icon-btn:disabled:hover { background: transparent; color: #aaa; }
+
+        .ann-panel-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px 0;
+        }
+
+        /* --- Annotation Cards --- */
+        .ann-card {
+            display: flex;
+            flex-direction: column;
+            padding: 6px 10px;
+            cursor: pointer;
+            transition: background 0.1s ease;
+            border-left: 3px solid transparent;
+            user-select: none;
+        }
+        .ann-card:hover { background: rgba(255,255,255,0.06); }
+        .ann-card.selected {
+            background: rgba(50,100,200,0.25);
+            border-left-color: #3d7cc8;
+        }
+        .ann-card.hidden-ann { opacity: 0.45; }
+
+        .ann-card-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-height: 22px;
+        }
+
+        .ann-swatch {
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+            flex-shrink: 0;
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+
+        .ann-type {
+            font-size: 10px;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            flex-shrink: 0;
+        }
+
+        .ann-label {
+            flex: 1;
+            min-width: 0;
+            font-size: 12px;
+            color: #eee;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .ann-actions {
+            display: flex;
+            gap: 0;
+            margin-left: auto;
+            flex-shrink: 0;
+        }
+        .ann-card .ann-action-btn {
+            width: 20px;
+            height: 20px;
+            padding: 0;
+            border: none;
+            background: transparent;
+            color: #777;
+            cursor: pointer;
+            border-radius: 3px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.1s ease, color 0.1s ease;
+        }
+        .ann-card:hover .ann-action-btn { opacity: 1; }
+        .ann-card.hidden-ann .ann-action-visibility { opacity: 1; } /* always show eye when hidden */
+        .ann-action-btn:hover { color: #fff; background: rgba(255,255,255,0.1); }
+        .ann-action-btn.ann-action-delete:hover { color: #e74c3c; }
+        .ann-action-btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.5; }
+
+        /* Details expansion */
+        .ann-details {
+            display: none;
+            font-size: 11px;
+            color: #bbb;
+            padding: 4px 0 2px 18px;
+            line-height: 1.4;
+        }
+        .ann-card.expanded .ann-details { display: block; }
+        .ann-details .ann-coords {
+            font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+            color: #888;
+            font-size: 10px;
+        }
+        .ann-desc { margin-top: 4px; color: #ccc; }
+        .ann-desc p { margin: 0 0 4px 0; }
+        .ann-desc p:last-child { margin-bottom: 0; }
+        .ann-desc strong { color: #fff; }
+        .ann-desc em { color: #ddd; }
+        .ann-desc code {
+            font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+            background: rgba(255,255,255,0.1);
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+        .ann-desc a { color: #6ab0ff; }
+        .ann-desc ul, .ann-desc ol { margin: 2px 0; padding-left: 18px; }
+        .ann-desc li { margin: 0; }
+
+        /* Details nav footer */
+        .ann-panel-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 6px 10px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            font-size: 11px;
+            color: #888;
+        }
+        .ann-panel-footer-nav { display: flex; gap: 2px; }
     </style>
 </head>
 <body>
     <div id="cesiumContainer"></div>
+
+    <!-- Toolbar buttons (right to left) -->
+    <button id="panel-btn" class="toolbar-btn" title="Toggle annotations panel" style="display:none">
+        <svg viewBox="0 0 24 24"><path d="M3 5h18v2H3zm0 6h12v2H3zm0 6h18v2H3z"/></svg>
+        <span id="panel-badge"></span>
+    </button>
     <button id="copy-btn" class="toolbar-btn" title="Copy annotations as Markdown + GeoJSON" style="display:none">
-        <!-- Copy/clipboard icon -->
         <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
     </button>
     <button id="fullscreen-btn" class="toolbar-btn" title="Toggle fullscreen">
-        <!-- Expand icon (shown when inline) -->
         <svg id="expand-icon" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
-        <!-- Compress icon (shown when fullscreen) -->
         <svg id="compress-icon" style="display:none" viewBox="0 0 24 24"><path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z"/></svg>
     </button>
+
+    <!-- Floating Annotation Panel -->
+    <div id="ann-panel" class="ann-panel">
+        <div class="ann-panel-header" id="ann-panel-header">
+            <span>Annotations (<span id="ann-count">0</span>)</span>
+            <div class="ann-panel-header-actions">
+                <button id="ann-clear" class="ann-icon-btn" title="Clear all">
+                    <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/></svg>
+                </button>
+                <button id="ann-close" class="ann-icon-btn" title="Close panel">
+                    <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+        </div>
+        <div id="ann-list" class="ann-panel-list"></div>
+        <div class="ann-panel-footer">
+            <span id="ann-footer-info"></span>
+            <div class="ann-panel-footer-nav">
+                <button id="ann-prev" class="ann-icon-btn" title="Previous annotation">
+                    <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                </button>
+                <button id="ann-next" class="ann-icon-btn" title="Next annotation">
+                    <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <div id="loading">Loading globe...</div>
     <script type="module" src="/src/mcp-app.ts"></script>
 </body>

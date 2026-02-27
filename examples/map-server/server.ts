@@ -37,12 +37,19 @@ const PointCoord = z.object({
   longitude: z.number().describe("Longitude, -180 to 180"),
 });
 
+/** Optional markdown notes shown in the annotation panel details card. */
+const Description = z
+  .string()
+  .optional()
+  .describe("Optional markdown description (shown in the annotation panel)");
+
 const MarkerAnnotation = z.object({
   type: z.literal("marker"),
   id: z.string().describe("Unique annotation id (chosen by caller)"),
   latitude: z.number().describe("Latitude, -90 to 90"),
   longitude: z.number().describe("Longitude, -180 to 180"),
   label: z.string().optional().describe("Text label"),
+  description: Description,
   color: z.string().optional().describe('CSS color (default "red")'),
 });
 
@@ -51,6 +58,7 @@ const RouteAnnotation = z.object({
   id: z.string().describe("Unique annotation id (chosen by caller)"),
   points: z.array(PointCoord).describe("Ordered waypoints"),
   label: z.string().optional().describe("Text label (shown at midpoint)"),
+  description: Description,
   color: z.string().optional().describe('CSS color (default "blue")'),
   width: z.number().optional().describe("Line width in px (default 3)"),
   dashed: z.boolean().optional().describe("Dashed line style"),
@@ -61,6 +69,7 @@ const AreaAnnotation = z.object({
   id: z.string().describe("Unique annotation id (chosen by caller)"),
   points: z.array(PointCoord).describe("Polygon vertices (min 3, auto-closed)"),
   label: z.string().optional().describe("Text label (shown at centroid)"),
+  description: Description,
   color: z.string().optional().describe('Outline CSS color (default "blue")'),
   fillColor: z
     .string()
@@ -75,6 +84,7 @@ const CircleAnnotation = z.object({
   longitude: z.number().describe("Center longitude"),
   radiusKm: z.number().describe("Radius in km"),
   label: z.string().optional().describe("Text label (shown at center)"),
+  description: Description,
   color: z.string().optional().describe('Outline CSS color (default "blue")'),
   fillColor: z.string().optional().describe("Fill CSS color"),
 });
@@ -95,6 +105,7 @@ const MarkerAnnotationUpdate = z.object({
   latitude: z.number().optional().describe("New latitude"),
   longitude: z.number().optional().describe("New longitude"),
   label: z.string().optional().describe("New label"),
+  description: Description,
   color: z.string().optional().describe("New color"),
 });
 
@@ -103,6 +114,7 @@ const RouteAnnotationUpdate = z.object({
   id: z.string().describe("Annotation id to update"),
   points: z.array(PointCoord).optional().describe("Replacement waypoints"),
   label: z.string().optional().describe("New label"),
+  description: Description,
   color: z.string().optional().describe("New color"),
   width: z.number().optional().describe("New line width"),
   dashed: z.boolean().optional().describe("New dashed style"),
@@ -116,6 +128,7 @@ const AreaAnnotationUpdate = z.object({
     .optional()
     .describe("Replacement polygon vertices"),
   label: z.string().optional().describe("New label"),
+  description: Description,
   color: z.string().optional().describe("New outline color"),
   fillColor: z.string().optional().describe("New fill color"),
 });
@@ -127,6 +140,7 @@ const CircleAnnotationUpdate = z.object({
   longitude: z.number().optional().describe("New center longitude"),
   radiusKm: z.number().optional().describe("New radius in km"),
   label: z.string().optional().describe("New label"),
+  description: Description,
   color: z.string().optional().describe("New outline color"),
   fillColor: z.string().optional().describe("New fill color"),
 });
