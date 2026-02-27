@@ -1768,6 +1768,60 @@ Example — add annotations then screenshot to verify:
     },
   );
 
+  // Tool: save_pdf (app-only) - Save annotated PDF back to local file
+  registerAppTool(
+    server,
+    "save_pdf",
+    {
+      title: "Save PDF",
+      description: "Save annotated PDF bytes back to a local file",
+      inputSchema: {
+        url: z.string().describe("Original PDF URL or local file path"),
+        data: z.string().describe("Base64-encoded PDF bytes"),
+      },
+      _meta: { ui: { visibility: ["app"] } },
+    },
+    async ({ url, data }): Promise<CallToolResult> => {
+      const validation = validateUrl(url);
+      if (!validation.valid) {
+        return {
+          content: [{ type: "text", text: validation.error! }],
+          isError: true,
+        };
+      }
+      const filePath = isFileUrl(url)
+        ? fileUrlToPath(url)
+        : isLocalPath(url)
+          ? decodeURIComponent(url)
+          : null;
+      if (!filePath) {
+        return {
+          content: [
+            { type: "text", text: "Save is only supported for local files" },
+          ],
+          isError: true,
+        };
+      }
+      try {
+        const bytes = Buffer.from(data, "base64");
+        await fs.promises.writeFile(path.resolve(filePath), bytes);
+        return {
+          content: [{ type: "text", text: `Saved to ${filePath}` }],
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Failed to save: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    },
+  );
+
   // Resource: UI HTML
   registerAppResource(
     server,

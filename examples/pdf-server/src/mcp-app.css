@@ -579,7 +579,8 @@ body {
   }
 }
 
-/* Download Button */
+/* Save / Download Buttons */
+.save-btn,
 .download-btn {
   display: flex;
   align-items: center;
@@ -595,11 +596,13 @@ body {
   transition: all 0.15s ease;
 }
 
+.save-btn:hover:not(:disabled),
 .download-btn:hover:not(:disabled) {
   background: var(--bg100);
   border-color: var(--bg300);
 }
 
+.save-btn:disabled,
 .download-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;

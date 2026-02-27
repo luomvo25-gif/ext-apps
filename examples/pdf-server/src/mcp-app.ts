@@ -143,6 +143,7 @@ const searchCloseBtn = document.getElementById(
 const highlightLayerEl = document.getElementById("highlight-layer")!;
 const annotationLayerEl = document.getElementById("annotation-layer")!;
 const formLayerEl = document.getElementById("form-layer") as HTMLDivElement;
+const saveBtn = document.getElementById("save-btn") as HTMLButtonElement;
 const downloadBtn = document.getElementById(
   "download-btn",
 ) as HTMLButtonElement;
@@ -2956,8 +2957,75 @@ function syncFormValuesToStorage(): void {
 }
 
 // =============================================================================
-// PDF Download with Annotations
+// PDF Save / Download with Annotations
 // =============================================================================
+
+/** Build annotated PDF bytes from the current state. */
+async function getAnnotatedPdfBytes(): Promise<Uint8Array> {
+  if (!pdfDocument) throw new Error("No PDF loaded");
+  const fullBytes = await pdfDocument.getData();
+
+  // Only export user-added annotations; baseline ones are already in the PDF
+  const annotations: PdfAnnotationDef[] = [];
+  const baselineIds = new Set(pdfBaselineAnnotations.map((a) => a.id));
+  for (const tracked of annotationMap.values()) {
+    if (!baselineIds.has(tracked.def.id)) {
+      annotations.push(tracked.def);
+    }
+  }
+
+  return buildAnnotatedPdfBytes(
+    fullBytes as Uint8Array,
+    annotations,
+    formFieldValues,
+  );
+}
+
+/** Check if the current PDF URL is a local file that can be saved back. */
+function isLocalFileUrl(): boolean {
+  return (
+    pdfUrl.startsWith("file://") ||
+    pdfUrl.startsWith("computer://") ||
+    pdfUrl.startsWith("/")
+  );
+}
+
+async function savePdf(): Promise<void> {
+  if (!pdfDocument) return;
+  saveBtn.disabled = true;
+  saveBtn.title = "Saving...";
+
+  try {
+    const pdfBytes = await getAnnotatedPdfBytes();
+    const base64 = uint8ArrayToBase64(pdfBytes);
+
+    const result = await app.callServerTool({
+      name: "save_pdf",
+      arguments: { url: pdfUrl, data: base64 },
+    });
+
+    if (result.isError) {
+      log.error("Save error:", result.content);
+    } else {
+      log.info("PDF saved successfully");
+      // Clear dirty flag and localStorage diff since annotations are now in the file
+      setDirty(false);
+      const key = annotationStorageKey();
+      if (key) {
+        try {
+          localStorage.removeItem(key);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  } catch (err) {
+    log.error("Save error:", err);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.title = "Save to file (overwrites original)";
+  }
+}
 
 async function downloadAnnotatedPdf(): Promise<void> {
   if (!pdfDocument) return;
@@ -2965,32 +3033,12 @@ async function downloadAnnotatedPdf(): Promise<void> {
   downloadBtn.title = "Preparing download...";
 
   try {
-    // Get raw PDF bytes directly from pdf.js (already loaded in memory)
-    const fullBytes = await pdfDocument.getData();
+    const pdfBytes = await getAnnotatedPdfBytes();
 
-    // Collect annotations to export (only user-added, not PDF baseline)
-    const annotations: PdfAnnotationDef[] = [];
-    const baselineIds = new Set(pdfBaselineAnnotations.map((a) => a.id));
-    for (const tracked of annotationMap.values()) {
-      // Only export user-added annotations; baseline ones are already in the PDF
-      if (!baselineIds.has(tracked.def.id)) {
-        annotations.push(tracked.def);
-      }
-    }
-
-    // Build PDF with proper annotation objects
-    const pdfBytes = await buildAnnotatedPdfBytes(
-      fullBytes as Uint8Array,
-      annotations,
-      formFieldValues,
-    );
-
-    // Use app.downloadFile if host supports it, otherwise fall back to <a> tag
     const hasEdits = annotationMap.size > 0 || formFieldValues.size > 0;
     const baseName = (pdfTitle || "document").replace(/\.pdf$/i, "");
     const fileName = hasEdits ? `${baseName} - edited.pdf` : `${baseName}.pdf`;
 
-    // Convert to base64
     const base64 = uint8ArrayToBase64(pdfBytes);
 
     if (app.getHostCapabilities()?.downloadFile) {
@@ -3375,6 +3423,7 @@ searchPrevBtn.addEventListener("click", goToPrevMatch);
 searchNextBtn.addEventListener("click", goToNextMatch);
 fullscreenBtn.addEventListener("click", toggleFullscreen);
 downloadBtn.addEventListener("click", downloadAnnotatedPdf);
+saveBtn.addEventListener("click", savePdf);
 
 // Sync user form input back to formFieldValues for persistence
 formLayerEl.addEventListener("input", (e) => {
@@ -3551,6 +3600,15 @@ document.addEventListener("keydown", (e) => {
       redo();
     } else {
       undo();
+    }
+    return;
+  }
+
+  // Ctrl/Cmd+S: save (for local files)
+  if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+    e.preventDefault();
+    if (isLocalFileUrl() && isDirty) {
+      savePdf();
     }
     return;
   }
@@ -3991,6 +4049,8 @@ app.ontoolresult = async (result: CallToolResult) => {
       ? ""
       : "none";
     // downloadBtn.style.display = "";
+    // Show save button only for local files
+    saveBtn.style.display = isLocalFileUrl() ? "" : "none";
 
     // Import annotations from the PDF to establish baseline
     await loadBaselineAnnotations(document);
