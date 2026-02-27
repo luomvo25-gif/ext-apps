@@ -49,9 +49,10 @@
         .toolbar-btn:hover { background: rgba(0, 0, 0, 0.85); }
         .toolbar-btn svg { width: 20px; height: 20px; fill: currentColor; }
         #fullscreen-btn { right: 10px; }
-        #copy-btn { right: 52px; }
+        #download-btn { right: 52px; }
+        #copy-btn { right: 94px; }
         #copy-btn.copied svg { fill: #4ade80; }
-        #panel-btn { right: 94px; }
+        #panel-btn { right: 136px; }
         #panel-btn.active { background: var(--accent); }
 
         #panel-badge {
@@ -262,6 +263,9 @@
     </button>
     <button id="copy-btn" class="toolbar-btn" title="Copy annotations as Markdown + GeoJSON" style="display:none">
         <svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+    </button>
+    <button id="download-btn" class="toolbar-btn" title="Download annotations as Markdown + GeoJSON" style="display:none">
+        <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
     </button>
     <button id="fullscreen-btn" class="toolbar-btn" title="Toggle fullscreen">
         <svg id="expand-icon" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>

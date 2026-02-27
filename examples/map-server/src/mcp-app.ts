@@ -1575,40 +1575,49 @@ function stopPolling(): void {
 // Copy / Export Annotations
 // =============================================================================
 
+/** Human-readable location/size details for an annotation. */
+function annDetails(d: AnnotationDef): string {
+  switch (d.type) {
+    case "marker":
+      return `${d.latitude.toFixed(6)}, ${d.longitude.toFixed(6)}`;
+    case "route":
+      return `${d.points.length} waypoints`;
+    case "area":
+      return `${d.points.length} vertices`;
+    case "circle":
+      return `${d.latitude.toFixed(6)}, ${d.longitude.toFixed(6)} r=${d.radiusKm}km`;
+  }
+}
+
 /**
- * Format annotations as a Markdown table
+ * Format annotations as Markdown: a summary table, then a section per
+ * annotation that has a description (so multi-line markdown renders properly).
  */
 function annotationsToMarkdown(annotations: TrackedAnnotation[]): string {
   const lines = [
     "| # | Type | ID | Label | Details | Color |",
     "| --- | --- | --- | --- | --- | --- |",
   ];
+  const descSections: string[] = [];
   for (let i = 0; i < annotations.length; i++) {
     const d = annotations[i].def;
-    let details = "";
-    switch (d.type) {
-      case "marker":
-        details = `${d.latitude.toFixed(6)}, ${d.longitude.toFixed(6)}`;
-        break;
-      case "route":
-        details = `${d.points.length} waypoints`;
-        break;
-      case "area":
-        details = `${d.points.length} vertices`;
-        break;
-      case "circle":
-        details = `${d.latitude.toFixed(6)}, ${d.longitude.toFixed(6)} r=${d.radiusKm}km`;
-        break;
-    }
     lines.push(
-      `| ${i + 1} | ${d.type} | ${d.id} | ${d.label || ""} | ${details} | ${d.color || (d.type === "marker" ? "red" : "blue")} |`,
+      `| ${i + 1} | ${d.type} | ${d.id} | ${d.label || ""} | ${annDetails(d)} | ${d.color || (d.type === "marker" ? "red" : "blue")} |`,
     );
+    if (d.description) {
+      descSections.push(`### ${d.label || d.id}\n\n${d.description}`);
+    }
   }
-  return lines.join("\n");
+  let md = lines.join("\n");
+  if (descSections.length > 0) {
+    md += "\n\n" + descSections.join("\n\n");
+  }
+  return md;
 }
 
 /**
- * Format annotations as GeoJSON FeatureCollection
+ * Format annotations as GeoJSON FeatureCollection. Includes description in
+ * properties.description where present.
  */
 function annotationsToGeoJSON(annotations: TrackedAnnotation[]): string {
   const features = annotations.map((t) => {
@@ -1617,6 +1626,7 @@ function annotationsToGeoJSON(annotations: TrackedAnnotation[]): string {
       name: d.label || d.id,
       annotationType: d.type,
       color: d.color,
+      ...(d.description ? { description: d.description } : {}),
     };
 
     switch (d.type) {
@@ -1670,71 +1680,68 @@ function annotationsToGeoJSON(annotations: TrackedAnnotation[]): string {
   return JSON.stringify({ type: "FeatureCollection", features }, null, 2);
 }
 
-/**
- * Copy annotations to clipboard in multiple formats (Markdown + GeoJSON)
- */
-async function copyAnnotations(): Promise<void> {
-  const annotations = allAnnotations();
-  if (annotations.length === 0) return;
+/** Combined Markdown + fenced GeoJSON export string (used by both copy & download). */
+function exportText(): string | null {
+  const anns = allAnnotations();
+  if (anns.length === 0) return null;
+  return `${annotationsToMarkdown(anns)}\n\n\`\`\`geojson\n${annotationsToGeoJSON(anns)}\n\`\`\``;
+}
 
-  const md = annotationsToMarkdown(annotations);
-  const geojson = annotationsToGeoJSON(annotations);
+/** Copy annotations to clipboard (text/plain + text/html). */
+async function copyAnnotations(): Promise<void> {
+  const anns = allAnnotations();
+  const text = exportText();
+  if (!text) return;
+
   const btn = document.getElementById("copy-btn");
+  const flash = () => {
+    btn?.classList.add("copied");
+    setTimeout(() => btn?.classList.remove("copied"), 1200);
+  };
+
+  // Rich HTML for pasting into docs: table + GeoJSON in a <details>
+  const geojson = annotationsToGeoJSON(anns);
+  const rows = anns
+    .map(
+      (t, i) =>
+        `<tr><td>${i + 1}</td><td>${t.def.type}</td><td>${t.def.id}</td><td>${t.def.label || ""}</td><td>${annDetails(t.def)}</td><td>${t.def.color || (t.def.type === "marker" ? "red" : "blue")}</td></tr>`,
+    )
+    .join("\n");
+  const html =
+    `<table>\n<tr><th>#</th><th>Type</th><th>ID</th><th>Label</th><th>Details</th><th>Color</th></tr>\n${rows}\n</table>\n` +
+    `<details><summary>GeoJSON</summary><pre><code>${geojson.replace(/</g, "&lt;")}</code></pre></details>`;
 
   try {
-    // Multi-mime clipboard: text/plain gets Markdown, text/html gets table + GeoJSON
-    const htmlContent = `<table>\n<tr><th>#</th><th>Type</th><th>ID</th><th>Label</th><th>Details</th><th>Color</th></tr>\n${annotations
-      .map((t, i) => {
-        const d = t.def;
-        let details = "";
-        switch (d.type) {
-          case "marker":
-            details = `${d.latitude.toFixed(6)}, ${d.longitude.toFixed(6)}`;
-            break;
-          case "route":
-            details = `${d.points.length} waypoints`;
-            break;
-          case "area":
-            details = `${d.points.length} vertices`;
-            break;
-          case "circle":
-            details = `${d.latitude.toFixed(6)}, ${d.longitude.toFixed(6)} r=${d.radiusKm}km`;
-            break;
-        }
-        return `<tr><td>${i + 1}</td><td>${d.type}</td><td>${d.id}</td><td>${d.label || ""}</td><td>${details}</td><td>${d.color || (d.type === "marker" ? "red" : "blue")}</td></tr>`;
-      })
-      .join(
-        "\n",
-      )}\n</table>\n<details><summary>GeoJSON</summary><pre><code>${geojson.replace(/</g, "&lt;")}</code></pre></details>`;
-
     await navigator.clipboard.write([
       new ClipboardItem({
-        "text/plain": new Blob([`${md}\n\n\`\`\`geojson\n${geojson}\n\`\`\``], {
-          type: "text/plain",
-        }),
-        "text/html": new Blob([htmlContent], { type: "text/html" }),
+        "text/plain": new Blob([text], { type: "text/plain" }),
+        "text/html": new Blob([html], { type: "text/html" }),
       }),
     ]);
-
-    if (btn) {
-      btn.classList.add("copied");
-      setTimeout(() => btn.classList.remove("copied"), 1200);
-    }
-    log.info(`Copied ${annotations.length} annotation(s) to clipboard`);
-  } catch (e) {
-    // Fallback: plain text only
+    flash();
+    log.info(`Copied ${anns.length} annotation(s)`);
+  } catch {
     try {
-      await navigator.clipboard.writeText(
-        `${md}\n\n\`\`\`geojson\n${geojson}\n\`\`\``,
-      );
-      if (btn) {
-        btn.classList.add("copied");
-        setTimeout(() => btn.classList.remove("copied"), 1200);
-      }
-    } catch (e2) {
-      log.error("Failed to copy annotations:", e2);
+      await navigator.clipboard.writeText(text);
+      flash();
+    } catch (e) {
+      log.error("Copy failed:", e);
     }
   }
+}
+
+/** Download annotations as a .md file (Markdown table + descriptions + GeoJSON). */
+function downloadAnnotations(): void {
+  const text = exportText();
+  if (!text) return;
+  const blob = new Blob([text], { type: "text/markdown" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `map-annotations-${new Date().toISOString().slice(0, 10)}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+  log.info("Downloaded annotations");
 }
 
 // =============================================================================
@@ -1779,12 +1786,18 @@ let panelCorner: PanelCorner = "bottom-right";
 /** Show/hide copy & panel buttons, badge count. Auto-closes panel if empty. */
 function updateToolbarButtons(): void {
   const count = annotationMap.size;
+  const show = count > 0 ? "flex" : "none";
   const copyBtn = document.getElementById("copy-btn");
+  const dlBtn = document.getElementById("download-btn");
   if (copyBtn) {
-    copyBtn.style.display = count > 0 ? "flex" : "none";
+    copyBtn.style.display = show;
     copyBtn.title = `Copy ${count} annotation(s) as Markdown + GeoJSON`;
   }
-  panelBtnEl.style.display = count > 0 ? "flex" : "none";
+  if (dlBtn) {
+    dlBtn.style.display = show;
+    dlBtn.title = `Download ${count} annotation(s) as Markdown + GeoJSON`;
+  }
+  panelBtnEl.style.display = show;
   panelBtnEl.classList.toggle("active", panelOpen);
   if (count > 0 && !panelOpen) {
     panelBadgeEl.textContent = String(count);
@@ -2184,13 +2197,22 @@ function initAnnotationPanel(): void {
     } else if (e.key === " ") {
       e.preventDefault();
       if (selectedIds.size === 0) return;
-      // 3-state cycle: hide all → show all → revert to snapshot → (repeat)
+      // When entering the cycle, decide: if all selected items share the same
+      // visibility, a simple 2-state toggle suffices (no snapshot/revert needed).
+      // Otherwise, run the 3-state cycle: hide all → show all → revert snapshot.
       if (spaceCycle === 0) {
+        const states = [...selectedIds].map(
+          (id) => annotationMap.get(id)?.visible ?? true,
+        );
+        const uniform = states.every((v) => v === states[0]);
+        if (uniform) {
+          // Simple toggle — no cycle state, stays at 0 so next Space toggles back.
+          for (const id of selectedIds) setAnnotationVisibility(id, !states[0]);
+          return;
+        }
+        // Mixed → snapshot + hide all, enter 3-state cycle
         spaceSnapshot = new Map(
-          [...selectedIds].map((id) => [
-            id,
-            annotationMap.get(id)?.visible ?? true,
-          ]),
+          [...selectedIds].map((id, i) => [id, states[i]]),
         );
         for (const id of selectedIds) setAnnotationVisibility(id, false);
         spaceCycle = 1;
@@ -2531,10 +2553,12 @@ async function initialize() {
     document.addEventListener("keydown", handleFullscreenKeyboard);
 
     // Set up copy button and annotation panel (must run after viewer exists)
-    const copyBtn = document.getElementById("copy-btn");
-    if (copyBtn) {
-      copyBtn.addEventListener("click", copyAnnotations);
-    }
+    document
+      .getElementById("copy-btn")
+      ?.addEventListener("click", copyAnnotations);
+    document
+      .getElementById("download-btn")
+      ?.addEventListener("click", downloadAnnotations);
     initAnnotationPanel();
 
     // Wait a bit for tool input, then try restoring persisted view or show default
