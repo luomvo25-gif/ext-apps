@@ -295,11 +295,14 @@ function scheduleLocationUpdate(cesiumViewer: any): void {
     }
 
     const { widthKm, heightKm } = getScaleDimensions(extent);
+    const diff = computeDiff();
 
-    // Update the model's context with the current map location and screenshot.
+    // Update the model's context with the current map location, annotation
+    // state diff, and screenshot.
     const text =
-      `The map view of ${app.getHostContext()?.toolInfo?.id} is now ${widthKm.toFixed(1)}km wide × ${heightKm.toFixed(1)}km tall, ` +
-      `centered on lat. / long. [${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}]`;
+      `Map view: ${widthKm.toFixed(1)}km × ${heightKm.toFixed(1)}km, ` +
+      `centered on [${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}]. ` +
+      `Annotations: ${annotationMap.size} total (${describeDiff(diff)}).`;
 
     // Build content array with text and optional screenshot
     const content: ContentBlock[] = [{ type: "text", text }];
@@ -527,10 +530,14 @@ async function initCesium(): Promise<any> {
   annotationDataSource = ds;
   log.info("Annotation data source with clustering created");
 
-  // Set up camera move end listener for reverse geocoding and view persistence
+  // Set up camera move end listener for reverse geocoding and view persistence.
+  // Also force a recluster: EntityCluster has hysteresis — clusters form at
+  // pixelRange on zoom-out but need MORE zoom-in to break apart. Toggling
+  // clustering off/on after each move gives symmetric behaviour.
   cesiumViewer.camera.moveEnd.addEventListener(() => {
     scheduleLocationUpdate(cesiumViewer);
     schedulePersistViewState(cesiumViewer);
+    scheduleRecluster();
   });
   log.info("Camera move listener registered");
 
@@ -1099,10 +1106,12 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
   const clusteredEntities: any[] = [];
   const viewerEntities: any[] = [];
   // Helper: add an entity, tag it with our annotation id, track it.
+  // Initial visibility respects both the per-item flag and the global override.
+  const initialShow = globalVisible && priorVisible;
   const add = (coll: any, opts: any, bucket: any[]) => {
     const ent = coll.add(opts);
     ent._annId = def.id;
-    ent.show = priorVisible;
+    ent.show = initialShow;
     bucket.push(ent);
     return ent;
   };
@@ -1305,63 +1314,149 @@ function removeAnnotation(cesiumViewer: any, id: string): void {
   log.info("Removed annotation", id);
 }
 
-/** Toggle an annotation's visibility (eye icon). Hidden annotations stay in the map. */
+/**
+ * Global visibility override (master eye). Individual `tracked.visible` flags
+ * are preserved — effective visibility is `globalVisible && tracked.visible`,
+ * so toggling the master eye off→on restores per-item state exactly.
+ */
+let globalVisible = true;
+
+/** Apply effective visibility (global ∧ individual) to an annotation's entities. */
+function applyEntityVisibility(tracked: TrackedAnnotation): void {
+  const show = globalVisible && tracked.visible;
+  for (const e of tracked.clusteredEntities) e.show = show;
+  for (const e of tracked.viewerEntities) e.show = show;
+}
+
+/** Toggle an annotation's individual visibility (eye icon). */
 function setAnnotationVisibility(id: string, visible: boolean): void {
   const tracked = annotationMap.get(id);
   if (!tracked) return;
   tracked.visible = visible;
-  for (const e of tracked.clusteredEntities) e.show = visible;
-  for (const e of tracked.viewerEntities) e.show = visible;
+  applyEntityVisibility(tracked);
   if (tracked.clusteredEntities.length > 0) scheduleRecluster();
   persistAnnotations();
   renderAnnotationPanel();
 }
 
-// =============================================================================
-// Persistence
-// =============================================================================
-
-/** Persisted shape: def + client-only visible flag. */
-interface PersistedAnnotation {
-  def: AnnotationDef;
-  visible: boolean;
+/** Toggle the global override. Individual flags are untouched. */
+function setGlobalVisibility(visible: boolean): void {
+  globalVisible = visible;
+  let hasClustered = false;
+  for (const t of annotationMap.values()) {
+    applyEntityVisibility(t);
+    if (t.clusteredEntities.length > 0) hasClustered = true;
+  }
+  if (hasClustered) scheduleRecluster();
+  renderAnnotationPanel();
 }
 
-/** Persist current annotations to localStorage */
+// =============================================================================
+// Persistence (diff-based)
+// =============================================================================
+
+/**
+ * Baseline annotations from the tool invocation (ontoolinput.args.annotations
+ * + ontoolresult._meta.initialAnnotations). We persist only the *diff* from
+ * this baseline so localStorage stays small and readable.
+ */
+const baselineAnnotations = new Map<string, AnnotationDef>();
+
+function recordBaseline(defs: AnnotationDef[]): void {
+  for (const d of defs) baselineAnnotations.set(d.id, d);
+}
+
+/** Diff of current state vs the baseline. */
+interface AnnotationDiff {
+  /** Baseline ids the user has deleted. */
+  removed: string[];
+  /** Baseline ids the user has hidden (visible=false). */
+  hidden: string[];
+  /** Annotations not present in the baseline (user-added via interact tool). */
+  added: AnnotationDef[];
+  /** Currently selected ids (restored on reload). */
+  selected: string[];
+}
+
+function computeDiff(): AnnotationDiff {
+  const removed: string[] = [];
+  const hidden: string[] = [];
+  const added: AnnotationDef[] = [];
+
+  // Baseline entries: check if removed or hidden
+  for (const id of baselineAnnotations.keys()) {
+    const tracked = annotationMap.get(id);
+    if (!tracked) removed.push(id);
+    else if (!tracked.visible) hidden.push(id);
+  }
+  // Current entries not in baseline → user-added
+  for (const t of annotationMap.values()) {
+    if (!baselineAnnotations.has(t.def.id)) {
+      added.push(t.def);
+      // Also record hidden state for added annotations
+      if (!t.visible) hidden.push(t.def.id);
+    }
+  }
+
+  return { removed, hidden, added, selected: [...selectedIds] };
+}
+
+/** Persist the diff (not the full list) to localStorage. */
 function persistAnnotations(): void {
   if (!viewUUID) return;
   try {
-    const data: PersistedAnnotation[] = allAnnotations().map((t) => ({
-      def: t.def,
-      visible: t.visible,
-    }));
-    localStorage.setItem(`${viewUUID}:annotations`, JSON.stringify(data));
+    const diff = computeDiff();
+    localStorage.setItem(`${viewUUID}:ann-diff`, JSON.stringify(diff));
   } catch (e) {
-    log.warn("Failed to persist annotations:", e);
+    log.warn("Failed to persist annotation diff:", e);
   }
 }
 
-/** Load persisted annotations from localStorage and add them to the map */
+/**
+ * Apply a persisted diff on top of the baseline. Called AFTER the baseline
+ * has been loaded into the map (from ontoolinput / ontoolresult).
+ */
 function restorePersistedAnnotations(cesiumViewer: any): void {
   if (!viewUUID) return;
   try {
-    const stored = localStorage.getItem(`${viewUUID}:annotations`);
+    const stored = localStorage.getItem(`${viewUUID}:ann-diff`);
     if (!stored) return;
-    const raw = JSON.parse(stored);
-    if (!Array.isArray(raw) || raw.length === 0) return;
-    for (const item of raw) {
-      // Back-compat: older format stored bare AnnotationDef objects
-      const def: AnnotationDef = item.def ?? item;
-      const visible: boolean = item.visible ?? true;
-      if (!annotationMap.has(def.id)) {
-        addAnnotation(cesiumViewer, def);
-        if (!visible) setAnnotationVisibility(def.id, false);
-      }
+    const diff = JSON.parse(stored) as Partial<AnnotationDiff>;
+
+    // Apply additions first (so hidden can also target them)
+    for (const def of diff.added ?? []) {
+      if (!annotationMap.has(def.id)) addAnnotation(cesiumViewer, def);
     }
-    log.info("Restored", raw.length, "persisted annotation(s)");
+    // Apply removals
+    for (const id of diff.removed ?? []) {
+      if (annotationMap.has(id)) removeAnnotation(cesiumViewer, id);
+    }
+    // Apply hidden flags
+    for (const id of diff.hidden ?? []) {
+      if (annotationMap.has(id)) setAnnotationVisibility(id, false);
+    }
+    // Restore selection (without flying — user will pick up where they left off)
+    selectedIds.clear();
+    for (const id of diff.selected ?? []) {
+      if (annotationMap.has(id)) selectedIds.add(id);
+    }
+    if (selectedIds.size > 0) {
+      selectionAnchorId = [...selectedIds].slice(-1)[0];
+      selectedAnnotationId = selectionAnchorId;
+    }
+    log.info("Restored annotation diff:", diff);
   } catch (e) {
-    log.warn("Failed to restore annotations:", e);
+    log.warn("Failed to restore annotation diff:", e);
   }
+}
+
+/** One-line summary of the diff for model context. */
+function describeDiff(d: AnnotationDiff): string {
+  const parts: string[] = [];
+  if (d.added.length > 0) parts.push(`${d.added.length} added`);
+  if (d.removed.length > 0) parts.push(`${d.removed.length} removed`);
+  if (d.hidden.length > 0) parts.push(`${d.hidden.length} hidden`);
+  return parts.length > 0 ? parts.join(", ") : "unchanged";
 }
 
 // =============================================================================
@@ -1669,8 +1764,17 @@ const selectedIds = new Set<string>();
 let selectedAnnotationId: string | null = null;
 /** Anchor for shift-click range selection. */
 let selectionAnchorId: string | null = null;
+/**
+ * 3-state Space cycle for selected items:
+ *   0 (null snapshot) → snapshot + hide all
+ *   1 → show all
+ *   2 → restore snapshot, clear
+ * Cleared whenever selection changes.
+ */
+let spaceCycle: 0 | 1 | 2 = 0;
+let spaceSnapshot: Map<string, boolean> | null = null;
 type PanelCorner = "top-right" | "top-left" | "bottom-right" | "bottom-left";
-let panelCorner: PanelCorner = "top-right";
+let panelCorner: PanelCorner = "bottom-right";
 
 /** Show/hide copy & panel buttons, badge count. Auto-closes panel if empty. */
 function updateToolbarButtons(): void {
@@ -1788,17 +1892,21 @@ const SVG_TRASH = `<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejo
 function createAnnCard(tracked: TrackedAnnotation): HTMLElement {
   const d = tracked.def;
   const isSelected = selectedIds.has(d.id);
+  // Dim when hidden by EITHER the individual flag OR the global override;
+  // the individual eye icon still shows only the per-item state so the user
+  // can see (and edit) their fine-grained choices even while all are hidden.
+  const effectivelyVisible = globalVisible && tracked.visible;
   const card = document.createElement("div");
   card.className =
     "ann-card" +
     (isSelected ? " selected expanded" : "") +
-    (tracked.visible ? "" : " hidden-ann");
+    (effectivelyVisible ? "" : " hidden-ann");
   card.dataset.annId = d.id;
 
   const row = document.createElement("div");
   row.className = "ann-card-row";
 
-  // Eye toggle (leading)
+  // Eye toggle (leading) — shows & edits the per-item flag only
   const eyeBtn = document.createElement("button");
   eyeBtn.className = "ann-eye";
   eyeBtn.title = tracked.visible ? "Hide" : "Show";
@@ -1876,10 +1984,11 @@ function renderAnnotationPanel(): void {
   annListEl.textContent = "";
   for (const t of all) annListEl.appendChild(createAnnCard(t));
 
-  // Master eye: show eye-off if everything is already hidden, else eye
-  const anyVisible = all.some((t) => t.visible);
-  annMasterEyeBtn.innerHTML = anyVisible ? SVG_EYE : SVG_EYE_OFF;
-  annMasterEyeBtn.title = anyVisible ? "Hide all" : "Show all";
+  // Master eye reflects the global override only (per-item flags are independent)
+  annMasterEyeBtn.innerHTML = globalVisible ? SVG_EYE : SVG_EYE_OFF;
+  annMasterEyeBtn.title = globalVisible
+    ? "Hide all (preserves individual visibility)"
+    : "Show all";
 
   // Footer nav state
   annPrevBtn.disabled = all.length <= 1;
@@ -1976,7 +2085,16 @@ function flyToBbox(bbox: BoundingBox): void {
 function flyToSelection(): void {
   const defs = [...selectedIds]
     .map((id) => annotationMap.get(id))
-    .filter((t): t is TrackedAnnotation => !!t && t.visible)
+    .filter((t): t is TrackedAnnotation => !!t && globalVisible && t.visible)
+    .map((t) => t.def);
+  const bbox = combinedBbox(defs);
+  if (bbox) flyToBbox(bbox);
+}
+
+/** Fly to fit all visible annotations. Used for initial view framing. */
+function fitAllAnnotations(): void {
+  const defs = allAnnotations()
+    .filter((t) => globalVisible && t.visible)
     .map((t) => t.def);
   const bbox = combinedBbox(defs);
   if (bbox) flyToBbox(bbox);
@@ -2011,6 +2129,12 @@ function selectAnnotation(
   selectedAnnotationId =
     selectedIds.size > 0 ? [...selectedIds].slice(-1)[0] : null;
 
+  // Selection changed → reset the Space visibility cycle
+  spaceCycle = 0;
+  spaceSnapshot = null;
+
+  persistAnnotations(); // diff includes selection
+
   if (!panelOpen) setPanelOpen(true);
   else renderAnnotationPanel();
 
@@ -2043,15 +2167,13 @@ function initAnnotationPanel(): void {
   annPrevBtn.addEventListener("click", () => navAnnotation(-1));
   annNextBtn.addEventListener("click", () => navAnnotation(1));
 
-  // Master eye: if any are visible, hide all; otherwise show all.
-  annMasterEyeBtn.addEventListener("click", () => {
-    const all = allAnnotations();
-    const anyVisible = all.some((t) => t.visible);
-    for (const t of all) setAnnotationVisibility(t.def.id, !anyVisible);
-  });
+  // Master eye toggles the global override only; per-item flags survive.
+  annMasterEyeBtn.addEventListener("click", () =>
+    setGlobalVisibility(!globalVisible),
+  );
 
-  // Keyboard nav: ↑/↓ with wrap, Escape to close. Attached to panel so any
-  // click inside (buttons, cards) keeps focus in the subtree and arrows work.
+  // Keyboard nav: ↑/↓ navigate, Space toggles visibility, Backspace deletes,
+  // Escape closes. Attached to panel so any click inside keeps focus in-tree.
   panelEl.addEventListener("keydown", (e) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -2059,6 +2181,33 @@ function initAnnotationPanel(): void {
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       navAnnotation(-1);
+    } else if (e.key === " ") {
+      e.preventDefault();
+      if (selectedIds.size === 0) return;
+      // 3-state cycle: hide all → show all → revert to snapshot → (repeat)
+      if (spaceCycle === 0) {
+        spaceSnapshot = new Map(
+          [...selectedIds].map((id) => [
+            id,
+            annotationMap.get(id)?.visible ?? true,
+          ]),
+        );
+        for (const id of selectedIds) setAnnotationVisibility(id, false);
+        spaceCycle = 1;
+      } else if (spaceCycle === 1) {
+        for (const id of selectedIds) setAnnotationVisibility(id, true);
+        spaceCycle = 2;
+      } else {
+        for (const [id, v] of spaceSnapshot ?? [])
+          if (selectedIds.has(id)) setAnnotationVisibility(id, v);
+        spaceSnapshot = null;
+        spaceCycle = 0;
+      }
+    } else if (e.key === "Backspace" || e.key === "Delete") {
+      e.preventDefault();
+      if (!viewer) return;
+      for (const id of [...selectedIds]) removeAnnotation(viewer, id);
+      persistAnnotations();
     } else if (e.key === "Escape") {
       setPanelOpen(false);
     }
@@ -2254,6 +2403,7 @@ app.ontoolinput = async (params) => {
 
     // Add annotations immediately (before waiting for tiles so they appear ASAP)
     if (args.annotations && args.annotations.length > 0) {
+      recordBaseline(args.annotations);
       for (const ann of args.annotations) {
         addAnnotation(viewer, ann);
       }
@@ -2280,27 +2430,26 @@ app.ontoolresult = async (result) => {
   viewUUID = result._meta?.viewUUID ? String(result._meta.viewUUID) : undefined;
   log.info("Tool result received, viewUUID:", viewUUID);
 
-  // Now that we have viewUUID, try to restore persisted view
-  // This overrides the tool input position if a saved state exists
+  // Now that we have viewUUID, try to restore persisted view.
+  // If the user had a prior camera position we honour it and skip auto-fit.
+  let restoredView = false;
   if (viewer && viewUUID) {
-    const restored = restorePersistedView(viewer);
-    if (restored) {
+    restoredView = restorePersistedView(viewer);
+    if (restoredView) {
       log.info("Restored persisted view from tool result handler");
       await waitForTilesLoaded(viewer);
       hideLoading();
     }
   }
 
-  // Restore persisted annotations first, then add any new initial ones
-  if (viewer && viewUUID) {
-    restorePersistedAnnotations(viewer);
-  }
-
-  // Add initial annotations from _meta (if any — skips duplicates via annotationMap)
+  // Step 1: record + load the baseline (initial annotations from _meta).
+  // ontoolinput may have already added some via args.annotations; those are
+  // also in baselineAnnotations already. We skip duplicates.
   const initialAnnotations = result._meta?.initialAnnotations as
     | AnnotationDef[]
     | undefined;
   if (viewer && initialAnnotations && initialAnnotations.length > 0) {
+    recordBaseline(initialAnnotations);
     for (const ann of initialAnnotations) {
       if (!annotationMap.has(ann.id)) {
         addAnnotation(viewer, ann);
@@ -2311,6 +2460,21 @@ app.ontoolresult = async (result) => {
       initialAnnotations.length,
       "initial annotation(s) from tool result",
     );
+  }
+
+  // Step 2: apply the persisted diff on top of the baseline (removals,
+  // hidden flags, user-added annotations, selection).
+  if (viewer && viewUUID) {
+    restorePersistedAnnotations(viewer);
+  }
+
+  // Auto-fit: if no persisted camera position and we have annotations, frame
+  // them all. This gives a sensible initial view that depends on annotation
+  // spread rather than the (often too-wide) bbox from tool input.
+  if (!restoredView && annotationMap.size > 0) {
+    fitAllAnnotations();
+    hasReceivedToolInput = true;
+    hideLoading();
   }
 
   // Ensure all current annotations are persisted (initial annotations from ontoolinput
