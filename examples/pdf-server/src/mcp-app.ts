@@ -1045,6 +1045,7 @@ function showHandles(tracked: TrackedAnnotation): void {
       const handle = document.createElement("div");
       handle.className = `annotation-handle ${corner}`;
       handle.dataset.corner = corner;
+      handle.title = "Drag to resize (Shift to keep proportions)";
       setupResizeHandle(handle, tracked, corner);
       el.appendChild(handle);
     }
@@ -1054,6 +1055,7 @@ function showHandles(tracked: TrackedAnnotation): void {
   if (ROTATABLE_TYPES.has(def.type)) {
     const handle = document.createElement("div");
     handle.className = "annotation-handle-rotate";
+    handle.title = "Drag to rotate";
     setupRotateHandle(handle, tracked);
     el.appendChild(handle);
   }
@@ -1194,7 +1196,7 @@ function applyMoveToDef(
 }
 
 // =============================================================================
-// Resize (rectangle only)
+// Resize (rectangle, circle, image)
 // =============================================================================
 
 function setupResizeHandle(
@@ -1206,10 +1208,14 @@ function setupResizeHandle(
     e.stopPropagation();
     e.preventDefault();
 
-    const def = tracked.def as RectangleAnnotation;
+    const def = tracked.def as
+      | RectangleAnnotation
+      | CircleAnnotation
+      | ImageAnnotation;
     const beforeDef = { ...def };
     const startX = e.clientX;
     const startY = e.clientY;
+    const aspectRatio = beforeDef.height / beforeDef.width;
 
     const onMouseMove = (ev: MouseEvent) => {
       const dxScreen = ev.clientX - startX;
@@ -1234,6 +1240,20 @@ function setupResizeHandle(
         newH -= pdfD.dy;
       } else {
         newH += pdfD.dy;
+      }
+
+      // Shift key: constrain aspect ratio
+      if (ev.shiftKey) {
+        // Use the wider dimension to drive the other
+        const candidateH = newW * aspectRatio;
+        newH = candidateH;
+        // Adjust origin for corners that anchor at bottom/left
+        if (corner.includes("s")) {
+          newY = beforeDef.y + beforeDef.height - newH;
+        }
+        if (corner.includes("w")) {
+          // width changed by resize, x was already adjusted above
+        }
       }
 
       // Enforce minimum size
@@ -1807,7 +1827,6 @@ function renderImageAnnotation(
   el.style.top = `${screen.top}px`;
   el.style.width = `${screen.width}px`;
   el.style.height = `${screen.height}px`;
-  el.style.position = "absolute";
   if (def.rotation) {
     el.style.transform = `rotate(${def.rotation}deg)`;
     el.style.transformOrigin = "center center";

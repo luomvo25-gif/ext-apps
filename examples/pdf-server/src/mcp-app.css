@@ -545,6 +545,13 @@ body {
   user-select: none;
 }
 
+.annotation-image {
+  position: absolute;
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+}
+
 /* Selection visuals */
 .annotation-selected {
   outline: 2px solid var(--accent, #2563eb);
