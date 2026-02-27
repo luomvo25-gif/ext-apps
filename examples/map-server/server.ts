@@ -371,15 +371,17 @@ export function createServer(): McpServer {
         latitude: z
           .number()
           .optional()
+          .default(48.8566)
           .describe("Center latitude (-90 to 90) — center+radius mode"),
         longitude: z
           .number()
           .optional()
+          .default(2.3522)
           .describe("Center longitude (-180 to 180) — center+radius mode"),
         radiusKm: z
           .number()
           .optional()
-          .default(50)
+          .default(8)
           .describe("Radius in km around center point (default 50)"),
         label: z
           .string()
@@ -388,6 +390,50 @@ export function createServer(): McpServer {
         annotations: z
           .array(AnnotationSchema)
           .optional()
+          .default([
+            {
+              type: "marker",
+              id: "eiffel",
+              latitude: 48.8584,
+              longitude: 2.2945,
+              label: "Eiffel Tower",
+              color: "#c0392b",
+              description:
+                "**Iconic iron lattice tower** built in 1889.\n\n- Height: 330m\n- Visitors: ~7M/year",
+            },
+            {
+              type: "marker",
+              id: "louvre",
+              latitude: 48.8606,
+              longitude: 2.3376,
+              label: "Louvre",
+              color: "#2980b9",
+              description:
+                "World's *largest* art museum. See [website](https://www.louvre.fr/en).",
+            },
+            {
+              type: "marker",
+              id: "notredame",
+              latitude: 48.853,
+              longitude: 2.3499,
+              label: "Notre-Dame",
+              color: "#27ae60",
+            },
+            {
+              type: "route",
+              id: "walk",
+              label: "Seine walk",
+              points: [
+                { latitude: 48.8584, longitude: 2.2945 },
+                { latitude: 48.8606, longitude: 2.3376 },
+                { latitude: 48.853, longitude: 2.3499 },
+              ],
+              color: "#8e44ad",
+              dashed: true,
+              description:
+                "Scenic `3.5km` riverside walk past three landmarks.",
+            },
+          ])
           .describe(
             "Initial annotations: markers, routes, areas, or circles to display on the map",
           ),

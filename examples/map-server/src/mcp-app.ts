@@ -5,7 +5,12 @@
  * Receives initial bounding box from the show-map tool and exposes
  * a navigate-to tool for the host to control navigation.
  */
-import { App } from "@modelcontextprotocol/ext-apps";
+import {
+  App,
+  applyDocumentTheme,
+  applyHostStyleVariables,
+  type McpUiHostContext,
+} from "@modelcontextprotocol/ext-apps";
 import type { ContentBlock } from "@modelcontextprotocol/sdk/spec.types.js";
 
 // TypeScript declaration for Cesium loaded from CDN
@@ -494,12 +499,14 @@ async function initCesium(): Promise<any> {
   log.info("Camera positioned, initial rendering started");
 
   // Create a CustomDataSource for markers with clustering enabled.
-  // Markers use point + native label; both are hidden together when clustered.
+  // Markers render as pin billboard + native label; both hide together when clustered.
   const ds = new Cesium.CustomDataSource("annotations");
   ds.clustering.enabled = true;
-  ds.clustering.pixelRange = 60;
-  ds.clustering.minimumClusterSize = 2;
-  ds.clustering.clusterBillboards = false; // we don't use billboards for markers
+  // Looser clustering: tolerate more overlap before merging. Higher minimum
+  // avoids merging just two neighbours into a cluster.
+  ds.clustering.pixelRange = 25;
+  ds.clustering.minimumClusterSize = 3;
+  ds.clustering.clusterBillboards = true;
   ds.clustering.clusterLabels = true;
   ds.clustering.clusterPoints = true;
 
@@ -746,9 +753,17 @@ app.onteardown = async () => {
 
 app.onerror = log.error;
 
+/** Apply theme + style variables from the host (for annotation panel light/dark). */
+function applyHostContextTheme(ctx: McpUiHostContext): void {
+  if (ctx.theme) applyDocumentTheme(ctx.theme);
+  if (ctx.styles?.variables) applyHostStyleVariables(ctx.styles.variables);
+}
+
 // Listen for host context changes (display mode, theme, etc.)
 app.onhostcontextchanged = (params) => {
   log.info("Host context changed:", params);
+
+  applyHostContextTheme(params);
 
   if (params.displayMode) {
     handleDisplayModeChange(
@@ -756,7 +771,6 @@ app.onhostcontextchanged = (params) => {
     );
   }
 
-  // Update button if available modes changed
   if (params.availableDisplayModes) {
     updateFullscreenButton();
   }
@@ -923,7 +937,6 @@ function parseCesiumColor(cssColor: string, fallback?: string): any {
 
 /**
  * Render a cluster count badge as a canvas image.
- * Returns a data URL suitable for Cesium billboard.image.
  */
 function renderClusterImage(count: number): string {
   const dpr = window.devicePixelRatio || 1;
@@ -935,7 +948,6 @@ function renderClusterImage(count: number): string {
   canvas.height = size;
   const ctx = canvas.getContext("2d")!;
 
-  // Circle background
   const r = size / 2;
   ctx.beginPath();
   ctx.arc(r, r, r - 1, 0, Math.PI * 2);
@@ -945,7 +957,6 @@ function renderClusterImage(count: number): string {
   ctx.lineWidth = Math.round(2 * dpr);
   ctx.stroke();
 
-  // Count text
   ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -956,23 +967,73 @@ function renderClusterImage(count: number): string {
 }
 
 /**
- * Common label style for annotation text (uses Cesium's native label so it
- * participates in clustering, unlike a custom billboard image).
+ * Render a map-pin shape (teardrop with inner hole) as a canvas image.
+ * The pin tip is at the bottom center of the canvas.
  */
-function labelGraphics(text: string, pixelOffsetY = -16): any {
+function renderPinImage(cssColor: string): string {
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(24 * dpr);
+  const h = Math.round(32 * dpr);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+
+  const cx = w / 2;
+  const r = w * 0.42; // head radius
+  const cy = r + 1 * dpr; // head center
+
+  // Teardrop: circle on top, triangular tail to the bottom tip
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, Math.PI, 0, false);
+  ctx.quadraticCurveTo(cx + r, cy + r * 0.4, cx, h - 1);
+  ctx.quadraticCurveTo(cx - r, cy + r * 0.4, cx - r, cy);
+  ctx.closePath();
+  ctx.fillStyle = cssColor;
+  ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,0.35)";
+  ctx.lineWidth = 1.5 * dpr;
+  ctx.stroke();
+
+  // Inner white hole
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.42, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255,255,255,0.95)";
+  ctx.fill();
+
+  return canvas.toDataURL("image/png");
+}
+
+/** Cache of rendered pin images by color (avoids redundant canvas work). */
+const pinImageCache = new Map<string, string>();
+function pinImage(cssColor: string): string {
+  let img = pinImageCache.get(cssColor);
+  if (!img) {
+    img = renderPinImage(cssColor);
+    pinImageCache.set(cssColor, img);
+  }
+  return img;
+}
+
+/**
+ * Common label style for annotation text. Native labels cluster correctly
+ * (unlike billboard images). Rectangular background only — Cesium's native
+ * label doesn't support rounded corners — so we keep padding tight.
+ */
+function labelGraphics(text: string, pixelOffsetY = -36): any {
   return {
     text,
-    font: '500 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    font: '500 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     fillColor: Cesium.Color.WHITE,
-    outlineColor: Cesium.Color.fromCssColorString("rgba(0,0,0,0.85)"),
-    outlineWidth: 3,
+    outlineColor: Cesium.Color.fromCssColorString("rgba(0,0,0,0.8)"),
+    outlineWidth: 2,
     style: Cesium.LabelStyle.FILL_AND_OUTLINE,
     verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
     pixelOffset: new Cesium.Cartesian2(0, pixelOffsetY),
     disableDepthTestDistance: Number.POSITIVE_INFINITY,
     showBackground: true,
-    backgroundColor: Cesium.Color.fromCssColorString("rgba(30,30,30,0.7)"),
-    backgroundPadding: new Cesium.Cartesian2(6, 3),
+    backgroundColor: Cesium.Color.fromCssColorString("rgba(30,30,30,0.75)"),
+    backgroundPadding: new Cesium.Cartesian2(5, 3),
   };
 }
 
@@ -1052,20 +1113,19 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
         def.longitude,
         def.latitude,
       );
-      const cesiumColor = parseCesiumColor(def.color || "red");
+      const color = def.color || "red";
+      const dpr = window.devicePixelRatio || 1;
 
-      // Single entity: point + native label. Both are hidden together when clustered
-      // (unlike a custom billboard image, which EntityCluster leaves visible — the
-      // root cause of the "stacked labels on cluster badge" bug).
+      // Single entity: pin billboard + native label. Both hide when clustered.
+      // The pin's tip is at the bottom-center, so anchor it there.
       add(
         annotationDataSource.entities,
         {
           position,
-          point: {
-            pixelSize: 12,
-            color: cesiumColor,
-            outlineColor: Cesium.Color.WHITE,
-            outlineWidth: 2,
+          billboard: {
+            image: pinImage(color),
+            scale: 1 / dpr,
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
           ...(def.label ? { label: labelGraphics(def.label) } : {}),
@@ -1237,7 +1297,9 @@ function removeAnnotation(cesiumViewer: any, id: string): void {
     cesiumViewer.entities.remove(entity);
   }
   annotationMap.delete(id);
+  selectedIds.delete(id);
   if (selectedAnnotationId === id) selectedAnnotationId = null;
+  if (selectionAnchorId === id) selectionAnchorId = null;
   updateToolbarButtons();
   renderAnnotationPanel();
   log.info("Removed annotation", id);
@@ -1596,8 +1658,17 @@ const annFooterInfoEl = document.getElementById(
   "ann-footer-info",
 ) as HTMLElement;
 
+const annMasterEyeBtn = document.getElementById(
+  "ann-master-eye",
+) as HTMLButtonElement;
+
 let panelOpen = false;
+/** Multi-select: set of selected annotation ids. */
+const selectedIds = new Set<string>();
+/** Single-id tracker for removeAnnotation() cleanup + ↑/↓ anchoring. */
 let selectedAnnotationId: string | null = null;
+/** Anchor for shift-click range selection. */
+let selectionAnchorId: string | null = null;
 type PanelCorner = "top-right" | "top-left" | "bottom-right" | "bottom-left";
 let panelCorner: PanelCorner = "top-right";
 
@@ -1626,6 +1697,7 @@ function setPanelOpen(open: boolean): void {
   if (open) {
     applyPanelPosition();
     renderAnnotationPanel();
+    annListEl.focus({ preventScroll: true });
   }
   updateToolbarButtons();
 }
@@ -1673,9 +1745,11 @@ function renderMarkdown(md: string): string {
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*(.+?)\*/g, "<em>$1</em>")
       .replace(/`([^`]+)`/g, "<code>$1</code>")
+      // Links use data-href; click handler calls app.openLink (iframe sandbox
+      // blocks direct navigation).
       .replace(
         /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-        '<a href="$2" target="_blank" rel="noreferrer">$1</a>',
+        '<a data-href="$2">$1</a>',
       );
   const flush = () => {
     if (list) {
@@ -1705,68 +1779,52 @@ function annColor(d: AnnotationDef): string {
   return d.color || (d.type === "marker" ? "red" : "blue");
 }
 
-function annSubtitle(d: AnnotationDef): string {
-  switch (d.type) {
-    case "marker":
-      return `${d.latitude.toFixed(4)}, ${d.longitude.toFixed(4)}`;
-    case "route":
-      return `${d.points.length} waypoints`;
-    case "area":
-      return `${d.points.length} vertices`;
-    case "circle":
-      return `${d.latitude.toFixed(4)}, ${d.longitude.toFixed(4)} · r=${d.radiusKm}km`;
-  }
-}
-
 /** SVG icon literals (stroke-based). */
 const SVG_EYE = `<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
 const SVG_EYE_OFF = `<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19M1 1l22 22"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/></svg>`;
 const SVG_TRASH = `<svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/></svg>`;
 
-/** Build a single annotation card element. */
+/** Build a single annotation card. Layout: [eye] [swatch] [label] [trash]. */
 function createAnnCard(tracked: TrackedAnnotation): HTMLElement {
   const d = tracked.def;
+  const isSelected = selectedIds.has(d.id);
   const card = document.createElement("div");
   card.className =
     "ann-card" +
-    (selectedAnnotationId === d.id ? " selected expanded" : "") +
+    (isSelected ? " selected expanded" : "") +
     (tracked.visible ? "" : " hidden-ann");
   card.dataset.annId = d.id;
 
   const row = document.createElement("div");
   row.className = "ann-card-row";
 
+  // Eye toggle (leading)
+  const eyeBtn = document.createElement("button");
+  eyeBtn.className = "ann-eye";
+  eyeBtn.title = tracked.visible ? "Hide" : "Show";
+  eyeBtn.innerHTML = tracked.visible ? SVG_EYE : SVG_EYE_OFF;
+  eyeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setAnnotationVisibility(d.id, !tracked.visible);
+  });
+  row.appendChild(eyeBtn);
+
+  // Color swatch
   const swatch = document.createElement("div");
   swatch.className = "ann-swatch";
   swatch.style.background = annColor(d);
   row.appendChild(swatch);
 
-  const type = document.createElement("span");
-  type.className = "ann-type";
-  type.textContent = d.type;
-  row.appendChild(type);
-
+  // Label (no type prefix)
   const label = document.createElement("span");
   label.className = "ann-label";
   label.textContent = d.label || d.id;
   label.title = d.label || d.id;
   row.appendChild(label);
 
-  const actions = document.createElement("div");
-  actions.className = "ann-actions";
-
-  const visBtn = document.createElement("button");
-  visBtn.className = "ann-action-btn ann-action-visibility";
-  visBtn.title = tracked.visible ? "Hide" : "Show";
-  visBtn.innerHTML = tracked.visible ? SVG_EYE : SVG_EYE_OFF;
-  visBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    setAnnotationVisibility(d.id, !tracked.visible);
-  });
-  actions.appendChild(visBtn);
-
+  // Trash (trailing)
   const delBtn = document.createElement("button");
-  delBtn.className = "ann-action-btn ann-action-delete";
+  delBtn.className = "ann-delete";
   delBtn.title = "Delete";
   delBtn.innerHTML = SVG_TRASH;
   delBtn.addEventListener("click", (e) => {
@@ -1774,29 +1832,38 @@ function createAnnCard(tracked: TrackedAnnotation): HTMLElement {
     if (viewer) removeAnnotation(viewer, d.id);
     persistAnnotations();
   });
-  actions.appendChild(delBtn);
+  row.appendChild(delBtn);
 
-  row.appendChild(actions);
   card.appendChild(row);
 
-  // Details (expanded) — coords + optional markdown description
-  const details = document.createElement("div");
-  details.className = "ann-details";
-  const coords = document.createElement("div");
-  coords.className = "ann-coords";
-  coords.textContent = annSubtitle(d);
-  details.appendChild(coords);
+  // Details — markdown description only (coords live in the MD/GeoJSON export).
   if (d.description) {
+    const details = document.createElement("div");
+    details.className = "ann-details";
     const desc = document.createElement("div");
     desc.className = "ann-desc";
     desc.innerHTML = renderMarkdown(d.description);
+    // Intercept link clicks → app.openLink (iframe sandbox blocks navigation)
+    desc.addEventListener("click", (e) => {
+      const a = (e.target as HTMLElement).closest("a[data-href]");
+      if (a) {
+        e.preventDefault();
+        e.stopPropagation();
+        const url = a.getAttribute("data-href")!;
+        app.openLink({ url }).catch((err) => log.warn("openLink failed", err));
+      }
+    });
     details.appendChild(desc);
+    card.appendChild(details);
   }
-  card.appendChild(details);
 
-  // Click: select + fly to
-  card.addEventListener("click", () => {
-    selectAnnotation(d.id, { fly: true });
+  // Click: select (cmd/ctrl = additive toggle, shift = range) + fly to fit selection
+  card.addEventListener("click", (e) => {
+    selectAnnotation(d.id, {
+      fly: true,
+      additive: e.metaKey || e.ctrlKey,
+      range: e.shiftKey,
+    });
   });
 
   return card;
@@ -1809,97 +1876,156 @@ function renderAnnotationPanel(): void {
   annListEl.textContent = "";
   for (const t of all) annListEl.appendChild(createAnnCard(t));
 
+  // Master eye: show eye-off if everything is already hidden, else eye
+  const anyVisible = all.some((t) => t.visible);
+  annMasterEyeBtn.innerHTML = anyVisible ? SVG_EYE : SVG_EYE_OFF;
+  annMasterEyeBtn.title = anyVisible ? "Hide all" : "Show all";
+
   // Footer nav state
-  const ids = all.map((t) => t.def.id);
-  const selIdx =
-    selectedAnnotationId != null ? ids.indexOf(selectedAnnotationId) : -1;
   annPrevBtn.disabled = all.length <= 1;
   annNextBtn.disabled = all.length <= 1;
-  annFooterInfoEl.textContent =
-    selIdx >= 0 ? `${selIdx + 1} / ${all.length}` : `${all.length} item(s)`;
+  if (selectedIds.size > 1) {
+    annFooterInfoEl.textContent = `${selectedIds.size} selected`;
+  } else if (selectedIds.size === 1) {
+    const ids = all.map((t) => t.def.id);
+    const idx = ids.indexOf([...selectedIds][0]);
+    annFooterInfoEl.textContent = `${idx + 1} / ${all.length}`;
+  } else {
+    annFooterInfoEl.textContent = `${all.length} item(s)`;
+  }
 }
 
 // --- Selection & fly-to ---
 
-/** Representative point (lat/lon) for any annotation type. */
-function annCenter(d: AnnotationDef): { lat: number; lon: number } {
-  switch (d.type) {
-    case "marker":
-    case "circle":
-      return { lat: d.latitude, lon: d.longitude };
-    case "route": {
-      const m = midpoint(d.points);
-      return { lat: m.latitude, lon: m.longitude };
-    }
-    case "area": {
-      const c = centroid(d.points);
-      return { lat: c.latitude, lon: c.longitude };
+/** Compute combined bbox for a set of annotation defs. */
+function combinedBbox(defs: AnnotationDef[]): BoundingBox | null {
+  let west = Infinity,
+    south = Infinity,
+    east = -Infinity,
+    north = -Infinity;
+  const expand = (lat: number, lon: number) => {
+    west = Math.min(west, lon);
+    east = Math.max(east, lon);
+    south = Math.min(south, lat);
+    north = Math.max(north, lat);
+  };
+  for (const d of defs) {
+    switch (d.type) {
+      case "marker":
+        expand(d.latitude, d.longitude);
+        break;
+      case "circle": {
+        const dLat = d.radiusKm / 111;
+        const dLon =
+          d.radiusKm / (111 * Math.cos((d.latitude * Math.PI) / 180));
+        expand(d.latitude - dLat, d.longitude - dLon);
+        expand(d.latitude + dLat, d.longitude + dLon);
+        break;
+      }
+      case "route":
+      case "area":
+        for (const p of d.points) expand(p.latitude, p.longitude);
+        break;
     }
   }
+  if (!isFinite(west)) return null;
+  // Pad by 20% for breathing room, with a minimum ~1km span.
+  const padLat = Math.max((north - south) * 0.2, 0.01);
+  const padLon = Math.max((east - west) * 0.2, 0.01);
+  return {
+    west: west - padLon,
+    south: south - padLat,
+    east: east + padLon,
+    north: north + padLat,
+  };
 }
 
 /**
- * Fly the camera to an annotation. When the panel is open, offset the target
- * horizontally so the annotation lands in the visible (non-occluded) area.
- *
- * We compute height directly here instead of using `calculateDestination`,
- * which imposes a 500km floor (far too high for close-up marker views).
+ * Fly the camera to fit a bbox. Applies a horizontal shift to keep the
+ * framed area clear of the floating panel.
  */
-function flyToAnnotation(d: AnnotationDef): void {
+function flyToBbox(bbox: BoundingBox): void {
   if (!viewer) return;
-  const { lat, lon } = annCenter(d);
-  // Reasonable view radius per type
-  const radiusKm =
-    d.type === "circle"
-      ? Math.max(d.radiusKm * 2.5, 1)
-      : d.type === "route" || d.type === "area"
-        ? 8
-        : 1.5;
-  // Height: roughly twice the ground extent gives a comfortable framing.
-  // 1km radius → ~4km altitude, clamped to [1km, 2000km].
-  const height = Math.max(1000, Math.min(2_000_000, radiusKm * 1000 * 2.5));
-  const lonSpanDeg = (radiusKm * 2) / (111 * Math.cos((lat * Math.PI) / 180));
+  const centerLat = (bbox.north + bbox.south) / 2;
+  const centerLon = (bbox.west + bbox.east) / 2;
+  const latSpanKm = (bbox.north - bbox.south) * 111;
+  const lonSpanKm =
+    (bbox.east - bbox.west) * 111 * Math.cos((centerLat * Math.PI) / 180);
+  const spanKm = Math.max(latSpanKm, lonSpanKm, 1);
+  // Height ≈ 1.5× the dominant span gives a comfortable top-down framing.
+  const height = Math.max(1000, Math.min(4_000_000, spanKm * 1000 * 1.5));
 
-  // Shift target longitude to compensate for panel occlusion.
-  let targetLon = lon;
+  let targetLon = centerLon;
   if (panelOpen) {
-    const canvas = viewer.canvas;
     const frac = Math.min(
       0.5,
-      (panelEl.offsetWidth || 0) / Math.max(canvas.clientWidth, 1),
+      (panelEl.offsetWidth || 0) / Math.max(viewer.canvas.clientWidth, 1),
     );
-    // Shift target east (panel on right) so it renders left of center.
     const sign = panelCorner.includes("right") ? 1 : -1;
-    targetLon = lon + (sign * (lonSpanDeg * frac)) / 2;
+    targetLon = centerLon + (sign * (bbox.east - bbox.west) * frac) / 2;
   }
 
   viewer.camera.flyTo({
-    destination: Cesium.Cartesian3.fromDegrees(targetLon, lat, height),
+    destination: Cesium.Cartesian3.fromDegrees(targetLon, centerLat, height),
     orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
     duration: 1.2,
   });
 }
 
-/** Select an annotation by id, optionally flying to it. Opens the panel. */
-function selectAnnotation(id: string, opts: { fly?: boolean } = {}): void {
-  const tracked = annotationMap.get(id);
-  if (!tracked) return;
-  selectedAnnotationId = id;
-  if (!panelOpen) setPanelOpen(true);
-  else renderAnnotationPanel();
-  // Scroll the card into view inside the panel
-  const cardEl = annListEl.querySelector(
-    `.ann-card[data-ann-id="${CSS.escape(id)}"]`,
-  );
-  cardEl?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  if (opts.fly && tracked.visible) flyToAnnotation(tracked.def);
+/** Fly to fit all currently selected annotations (skips hidden ones). */
+function flyToSelection(): void {
+  const defs = [...selectedIds]
+    .map((id) => annotationMap.get(id))
+    .filter((t): t is TrackedAnnotation => !!t && t.visible)
+    .map((t) => t.def);
+  const bbox = combinedBbox(defs);
+  if (bbox) flyToBbox(bbox);
 }
 
-/** Select the prev/next annotation relative to the current selection (wraps). */
+/**
+ * Select an annotation by id. Supports additive (cmd/ctrl-click) and range
+ * (shift-click) multi-select. Flies to fit the whole selection.
+ */
+function selectAnnotation(
+  id: string,
+  opts: { fly?: boolean; additive?: boolean; range?: boolean } = {},
+): void {
+  if (!annotationMap.has(id)) return;
+  const ids = allAnnotations().map((t) => t.def.id);
+
+  if (opts.range && selectionAnchorId && annotationMap.has(selectionAnchorId)) {
+    const a = ids.indexOf(selectionAnchorId);
+    const b = ids.indexOf(id);
+    const [lo, hi] = a < b ? [a, b] : [b, a];
+    selectedIds.clear();
+    for (let i = lo; i <= hi; i++) selectedIds.add(ids[i]);
+  } else if (opts.additive) {
+    if (selectedIds.has(id)) selectedIds.delete(id);
+    else selectedIds.add(id);
+    selectionAnchorId = id;
+  } else {
+    selectedIds.clear();
+    selectedIds.add(id);
+    selectionAnchorId = id;
+  }
+  selectedAnnotationId =
+    selectedIds.size > 0 ? [...selectedIds].slice(-1)[0] : null;
+
+  if (!panelOpen) setPanelOpen(true);
+  else renderAnnotationPanel();
+
+  annListEl
+    .querySelector(`.ann-card[data-ann-id="${CSS.escape(id)}"]`)
+    ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+
+  if (opts.fly) flyToSelection();
+}
+
+/** Navigate selection by ±1 with wrap-around. Replaces any multi-selection. */
 function navAnnotation(delta: 1 | -1): void {
   const ids = allAnnotations().map((t) => t.def.id);
   if (ids.length === 0) return;
-  const cur = selectedAnnotationId ? ids.indexOf(selectedAnnotationId) : -1;
+  const cur = selectionAnchorId ? ids.indexOf(selectionAnchorId) : -1;
   const next = (cur + delta + ids.length) % ids.length;
   selectAnnotation(ids[next], { fly: true });
 }
@@ -1916,6 +2042,27 @@ function initAnnotationPanel(): void {
   });
   annPrevBtn.addEventListener("click", () => navAnnotation(-1));
   annNextBtn.addEventListener("click", () => navAnnotation(1));
+
+  // Master eye: if any are visible, hide all; otherwise show all.
+  annMasterEyeBtn.addEventListener("click", () => {
+    const all = allAnnotations();
+    const anyVisible = all.some((t) => t.visible);
+    for (const t of all) setAnnotationVisibility(t.def.id, !anyVisible);
+  });
+
+  // Keyboard nav: ↑/↓ with wrap, Escape to close. Attached to panel so any
+  // click inside (buttons, cards) keeps focus in the subtree and arrows work.
+  panelEl.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      navAnnotation(1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      navAnnotation(-1);
+    } else if (e.key === "Escape") {
+      setPanelOpen(false);
+    }
+  });
 
   // Drag the panel by its header; snap to nearest corner on release
   const header = document.getElementById("ann-panel-header")!;
@@ -2192,8 +2339,9 @@ async function initialize() {
     await app.connect();
     log.info("Connected to host");
 
-    // Get initial display mode from host context
+    // Apply initial theme + get display mode from host context
     const context = app.getHostContext();
+    if (context) applyHostContextTheme(context);
     if (context?.displayMode) {
       currentDisplayMode = context.displayMode as
         | "inline"
