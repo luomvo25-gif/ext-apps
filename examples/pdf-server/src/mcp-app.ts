@@ -33,6 +33,8 @@ import {
   buildAnnotatedPdfBytes,
   importPdfjsAnnotation,
   uint8ArrayToBase64,
+  convertFromModelCoords,
+  convertToModelCoords,
 } from "./pdf-annotations.js";
 import "./global.css";
 import "./mcp-app.css";
@@ -764,7 +766,7 @@ async function updatePageContext() {
       viewUUID ? `viewUUID: ${viewUUID}` : null,
       pdfTitle ? `"${pdfTitle}"` : pdfUrl,
       `Current Page: ${currentPage}/${totalPages}`,
-      `Page size: ${pageWidthPt}×${pageHeightPt}pt (coordinates: origin at bottom-left, Y increases upward)`,
+      `Page size: ${pageWidthPt}×${pageHeightPt}pt (coordinates: origin at top-left, Y increases downward)`,
     ]
       .filter(Boolean)
       .join(" | ");
@@ -787,18 +789,18 @@ async function updatePageContext() {
       if (formFieldValues.size > 0) {
         annotationSection += ` | ${formFieldValues.size} form field(s) filled`;
       }
-      // List annotations on current page with their coordinates
+      // List annotations on current page with their coordinates (in model space)
       if (onThisPage.length > 0) {
         annotationSection +=
           "\nAnnotations on this page (visible in screenshot):";
         for (const t of onThisPage) {
-          const d = t.def;
+          const d = convertToModelCoords(t.def, pageHeightPt);
           const selected = selectedAnnotationIds.has(d.id) ? " (SELECTED)" : "";
           if ("rects" in d && d.rects.length > 0) {
             const r = d.rects[0];
-            annotationSection += `\n  [${d.id}] ${d.type} at (${r.x},${r.y}) ${r.width}x${r.height}${selected}`;
+            annotationSection += `\n  [${d.id}] ${d.type} at (${Math.round(r.x)},${Math.round(r.y)}) ${Math.round(r.width)}x${Math.round(r.height)}${selected}`;
           } else if ("x" in d && "y" in d) {
-            annotationSection += `\n  [${d.id}] ${d.type} at (${d.x},${d.y})${selected}`;
+            annotationSection += `\n  [${d.id}] ${d.type} at (${Math.round(d.x)},${Math.round(d.y)})${selected}`;
           }
         }
       }
@@ -4235,10 +4237,17 @@ type PdfCommand =
       getScreenshots: boolean;
     };
 
+/** Get page height in PDF points (for coordinate conversion). */
+async function getPageHeight(pageNum: number): Promise<number> {
+  if (!pdfDocument) return 792; // US Letter fallback
+  const page = await pdfDocument.getPage(pageNum);
+  return page.getViewport({ scale: 1.0 }).height;
+}
+
 /**
  * Process a batch of commands from the server queue
  */
-function processCommands(commands: PdfCommand[]): void {
+async function processCommands(commands: PdfCommand[]): Promise<void> {
   if (commands.length === 0) return;
 
   for (const cmd of commands) {
@@ -4281,12 +4290,32 @@ function processCommands(commands: PdfCommand[]): void {
         break;
       case "add_annotations":
         for (const def of cmd.annotations) {
-          addAnnotation(def);
+          const pageHeight = await getPageHeight(def.page);
+          addAnnotation(convertFromModelCoords(def, pageHeight));
         }
         break;
       case "update_annotations":
         for (const update of cmd.annotations) {
-          updateAnnotation(update);
+          const existing = annotationMap.get(update.id);
+          if (!existing) continue;
+          const pageHeight = await getPageHeight(existing.def.page);
+          // Merge partial update into existing def, convert the merged result,
+          // then extract only the fields that were in the original update
+          const merged = { ...existing.def, ...update } as PdfAnnotationDef;
+          const converted = convertFromModelCoords(merged, pageHeight);
+          const convertedUpdate = { ...update } as Record<string, unknown> &
+            typeof update;
+          for (const key of Object.keys(update)) {
+            convertedUpdate[key] = (
+              converted as unknown as Record<string, unknown>
+            )[key];
+          }
+          updateAnnotation(
+            convertedUpdate as Partial<PdfAnnotationDef> & {
+              id: string;
+              type: string;
+            },
+          );
         }
         break;
       case "remove_annotations":
@@ -4375,7 +4404,7 @@ async function pollLoop(): Promise<void> {
         [];
       if (commands.length > 0) {
         log.info(`Received ${commands.length} command(s)`);
-        processCommands(commands);
+        await processCommands(commands);
       }
     } catch (err) {
       log.error("Poll error:", err);

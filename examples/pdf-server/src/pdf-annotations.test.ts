@@ -12,6 +12,8 @@ import {
   buildAnnotatedPdfBytes,
   base64ToUint8Array,
   uint8ArrayToBase64,
+  convertFromModelCoords,
+  convertToModelCoords,
   type PdfAnnotationDef,
   type AnnotationDiff,
 } from "./pdf-annotations";
@@ -843,5 +845,209 @@ describe("buildAnnotatedPdfBytes", () => {
     // Should be able to save it again
     const bytes2 = await doc.save();
     expect(bytes2.length).toBeGreaterThan(0);
+  });
+});
+
+// =============================================================================
+// Coordinate Conversion (model ↔ internal PDF coords)
+// =============================================================================
+
+describe("coordinate conversion", () => {
+  const PAGE_HEIGHT = 792; // US Letter
+
+  it("round-trips a rectangle annotation", () => {
+    const original: PdfAnnotationDef = {
+      type: "rectangle",
+      id: "r1",
+      page: 1,
+      x: 72,
+      y: 50,
+      width: 200,
+      height: 30,
+    };
+    const converted = convertFromModelCoords(original, PAGE_HEIGHT);
+    const restored = convertToModelCoords(converted, PAGE_HEIGHT);
+    expect(restored).toEqual(original);
+  });
+
+  it("round-trips a circle annotation", () => {
+    const original: PdfAnnotationDef = {
+      type: "circle",
+      id: "c1",
+      page: 1,
+      x: 100,
+      y: 200,
+      width: 50,
+      height: 50,
+    };
+    const converted = convertFromModelCoords(original, PAGE_HEIGHT);
+    const restored = convertToModelCoords(converted, PAGE_HEIGHT);
+    expect(restored).toEqual(original);
+  });
+
+  it("round-trips a note annotation", () => {
+    const original: PdfAnnotationDef = {
+      type: "note",
+      id: "n1",
+      page: 1,
+      x: 100,
+      y: 100,
+      content: "Hello",
+    };
+    const converted = convertFromModelCoords(original, PAGE_HEIGHT);
+    const restored = convertToModelCoords(converted, PAGE_HEIGHT);
+    expect(restored).toEqual(original);
+  });
+
+  it("round-trips a freetext annotation", () => {
+    const original: PdfAnnotationDef = {
+      type: "freetext",
+      id: "ft1",
+      page: 1,
+      x: 72,
+      y: 50,
+      content: "Test",
+      fontSize: 14,
+    };
+    const converted = convertFromModelCoords(original, PAGE_HEIGHT);
+    const restored = convertToModelCoords(converted, PAGE_HEIGHT);
+    expect(restored).toEqual(original);
+  });
+
+  it("round-trips a stamp annotation", () => {
+    const original: PdfAnnotationDef = {
+      type: "stamp",
+      id: "s1",
+      page: 1,
+      x: 200,
+      y: 50,
+      label: "DRAFT",
+    };
+    const converted = convertFromModelCoords(original, PAGE_HEIGHT);
+    const restored = convertToModelCoords(converted, PAGE_HEIGHT);
+    expect(restored).toEqual(original);
+  });
+
+  it("round-trips a line annotation", () => {
+    const original: PdfAnnotationDef = {
+      type: "line",
+      id: "l1",
+      page: 1,
+      x1: 72,
+      y1: 50,
+      x2: 540,
+      y2: 742,
+    };
+    const converted = convertFromModelCoords(original, PAGE_HEIGHT);
+    const restored = convertToModelCoords(converted, PAGE_HEIGHT);
+    expect(restored).toEqual(original);
+  });
+
+  it("round-trips a highlight annotation", () => {
+    const original: PdfAnnotationDef = {
+      type: "highlight",
+      id: "h1",
+      page: 1,
+      rects: [
+        { x: 72, y: 50, width: 200, height: 12 },
+        { x: 72, y: 70, width: 150, height: 12 },
+      ],
+    };
+    const converted = convertFromModelCoords(original, PAGE_HEIGHT);
+    const restored = convertToModelCoords(converted, PAGE_HEIGHT);
+    expect(restored).toEqual(original);
+  });
+
+  it("round-trips an underline annotation", () => {
+    const original: PdfAnnotationDef = {
+      type: "underline",
+      id: "u1",
+      page: 1,
+      rects: [{ x: 72, y: 100, width: 200, height: 12 }],
+    };
+    const converted = convertFromModelCoords(original, PAGE_HEIGHT);
+    const restored = convertToModelCoords(converted, PAGE_HEIGHT);
+    expect(restored).toEqual(original);
+  });
+
+  it("round-trips a strikethrough annotation", () => {
+    const original: PdfAnnotationDef = {
+      type: "strikethrough",
+      id: "st1",
+      page: 1,
+      rects: [{ x: 72, y: 100, width: 200, height: 12 }],
+    };
+    const converted = convertFromModelCoords(original, PAGE_HEIGHT);
+    const restored = convertToModelCoords(converted, PAGE_HEIGHT);
+    expect(restored).toEqual(original);
+  });
+
+  it("converts rectangle y from model to PDF coords correctly", () => {
+    // Model: y=50 means near top of page, height=30
+    // PDF: y should be near bottom of the rect in PDF coords = 792 - 50 - 30 = 712
+    const model: PdfAnnotationDef = {
+      type: "rectangle",
+      id: "r1",
+      page: 1,
+      x: 72,
+      y: 50,
+      width: 200,
+      height: 30,
+    };
+    const pdf = convertFromModelCoords(model, PAGE_HEIGHT);
+    expect(pdf.type).toBe("rectangle");
+    expect((pdf as any).y).toBe(712); // 792 - 50 - 30
+    expect((pdf as any).x).toBe(72); // x unchanged
+  });
+
+  it("converts note y from model to PDF coords correctly", () => {
+    // Model: y=100 means 100pt from top
+    // PDF: y = 792 - 100 = 692
+    const model: PdfAnnotationDef = {
+      type: "note",
+      id: "n1",
+      page: 1,
+      x: 100,
+      y: 100,
+      content: "Test",
+    };
+    const pdf = convertFromModelCoords(model, PAGE_HEIGHT);
+    expect((pdf as any).y).toBe(692);
+  });
+
+  it("converts line endpoints from model to PDF coords correctly", () => {
+    const model: PdfAnnotationDef = {
+      type: "line",
+      id: "l1",
+      page: 1,
+      x1: 72,
+      y1: 50,
+      x2: 540,
+      y2: 742,
+    };
+    const pdf = convertFromModelCoords(model, PAGE_HEIGHT);
+    expect((pdf as any).y1).toBe(742); // 792 - 50
+    expect((pdf as any).y2).toBe(50); // 792 - 742
+  });
+
+  it("preserves non-coordinate fields during conversion", () => {
+    const original: PdfAnnotationDef = {
+      type: "rectangle",
+      id: "r1",
+      page: 2,
+      x: 72,
+      y: 50,
+      width: 200,
+      height: 30,
+      color: "#ff0000",
+      fillColor: "#00ff00",
+      rotation: 45,
+    };
+    const converted = convertFromModelCoords(original, PAGE_HEIGHT);
+    expect(converted.id).toBe("r1");
+    expect(converted.page).toBe(2);
+    expect((converted as any).color).toBe("#ff0000");
+    expect((converted as any).fillColor).toBe("#00ff00");
+    expect((converted as any).rotation).toBe(45);
   });
 });

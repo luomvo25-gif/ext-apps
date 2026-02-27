@@ -79,7 +79,7 @@ const LONG_POLL_TIMEOUT_MS = 30_000; // Max time to hold a long-poll request ope
 // Annotation Types
 // =============================================================================
 
-/** Rectangle in PDF coordinate space (bottom-left origin, in PDF points) */
+/** Rectangle in coordinate space (top-left origin for model-facing API, in PDF points) */
 const RectSchema = z.object({
   x: z.number(),
   y: z.number(),
@@ -1516,10 +1516,10 @@ IMPORTANT: viewUUID must be the exact UUID returned by display_pdf (e.g. "a1b2c3
 
 **ANNOTATION** — add_annotations with array of annotation objects. Each needs: id (unique string), type, page (1-indexed).
 
-**COORDINATE SYSTEM**: PDF points (1pt = 1/72in), origin at page BOTTOM-LEFT corner. X increases rightward, Y increases upward.
-- US Letter = 612×792pt. Margins: top≈y=742, bottom≈y=50, left≈x=72, right≈x=540, center≈(306, 396).
-- IMPORTANT: Rectangle/stamp x,y is the BOTTOM-LEFT corner. To place a 200×30 box at the TOP of the page: x=72, y=712, width=200, height=30 (top edge at y=742).
-- For highlights/underlines, each rect's y is the BOTTOM of the highlighted region.
+**COORDINATE SYSTEM**: PDF points (1pt = 1/72in), origin at page TOP-LEFT corner. X increases rightward, Y increases downward.
+- US Letter = 612×792pt. Margins: top≈y=50, bottom≈y=742, left≈x=72, right≈x=540, center≈(306, 396).
+- Rectangle/circle/stamp x,y is the TOP-LEFT corner. To place a 200×30 box at the TOP of the page: x=72, y=50, width=200, height=30.
+- For highlights/underlines, each rect's y is the TOP of the highlighted region.
 
 Annotation types:
 • highlight: rects:[{x,y,width,height}], color?, content? • underline: rects:[{x,y,w,h}], color?

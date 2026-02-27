@@ -123,6 +123,61 @@ export type PdfAnnotationDef =
   | StampAnnotation;
 
 // =============================================================================
+// Coordinate Conversion (model ↔ internal PDF coords)
+// =============================================================================
+
+/**
+ * Convert annotation coordinates from model space (top-left origin, Y↓)
+ * to internal PDF space (bottom-left origin, Y↑).
+ *
+ * Call this when receiving coordinates from the model via add/update_annotations.
+ */
+export function convertFromModelCoords(
+  def: PdfAnnotationDef,
+  pageHeight: number,
+): PdfAnnotationDef {
+  switch (def.type) {
+    case "highlight":
+    case "underline":
+    case "strikethrough":
+      return {
+        ...def,
+        rects: def.rects.map((r) => ({
+          ...r,
+          y: pageHeight - r.y - r.height,
+        })),
+      };
+    case "note":
+    case "freetext":
+    case "stamp":
+      return { ...def, y: pageHeight - def.y };
+    case "rectangle":
+    case "circle":
+      return { ...def, y: pageHeight - def.y - def.height };
+    case "line":
+      return {
+        ...def,
+        y1: pageHeight - def.y1,
+        y2: pageHeight - def.y2,
+      };
+  }
+}
+
+/**
+ * Convert annotation coordinates from internal PDF space (bottom-left origin, Y↑)
+ * to model space (top-left origin, Y↓).
+ *
+ * Call this when presenting coordinates to the model (e.g. in context strings).
+ */
+export function convertToModelCoords(
+  def: PdfAnnotationDef,
+  pageHeight: number,
+): PdfAnnotationDef {
+  // The conversion is its own inverse (same formula flips both ways)
+  return convertFromModelCoords(def, pageHeight);
+}
+
+// =============================================================================
 // Diff-Based Persistence Model
 // =============================================================================
 
