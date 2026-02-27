@@ -55,13 +55,8 @@ interface Rect {
   height: number;
 }
 
-type StampLabel =
-  | "APPROVED"
-  | "DRAFT"
-  | "CONFIDENTIAL"
-  | "FINAL"
-  | "VOID"
-  | "REJECTED";
+/** Stamp label — any text is allowed. Common labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED. */
+type StampLabel = string;
 
 interface AnnotationBase {
   id: string;

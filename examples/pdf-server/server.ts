@@ -87,14 +87,12 @@ const RectSchema = z.object({
   height: z.number(),
 });
 
-const StampLabel = z.enum([
-  "APPROVED",
-  "DRAFT",
-  "CONFIDENTIAL",
-  "FINAL",
-  "VOID",
-  "REJECTED",
-]);
+/** Any text is valid. Common labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED. */
+const StampLabel = z
+  .string()
+  .describe(
+    "Stamp label text (e.g. APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED, or any custom text)",
+  );
 
 const AnnotationBase = z.object({
   id: z.string(),
@@ -1501,7 +1499,7 @@ Annotation types:
 • highlight: rects:[{x,y,width,height}], color?, content? • underline: rects:[{x,y,w,h}], color?
 • strikethrough: rects:[{x,y,w,h}], color? • note: x, y, content, color?
 • rectangle: x, y, width, height, color?, fillColor? • freetext: x, y, content, fontSize?, color?
-• stamp: x, y, label (APPROVED|DRAFT|CONFIDENTIAL|FINAL|VOID|REJECTED), color?, rotation?
+• stamp: x, y, label (any text, e.g. APPROVED, DRAFT, CONFIDENTIAL), color?, rotation?
 
 TIP: For text annotations, prefer highlight_text (auto-finds text) over manual rects.
 
