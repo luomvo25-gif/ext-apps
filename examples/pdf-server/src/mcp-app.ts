@@ -1463,7 +1463,7 @@ function paintAnnotationsOnCanvas(
           const cx = s.left + s.width / 2;
           const cy = s.top + s.height / 2;
           ctx.translate(cx, cy);
-          ctx.rotate((-def.rotation * Math.PI) / 180);
+          ctx.rotate((def.rotation * Math.PI) / 180);
           ctx.translate(-cx, -cy);
         }
         if (def.fillColor) {
@@ -1669,7 +1669,7 @@ function renderRectangleAnnotation(
   if (def.color) el.style.borderColor = def.color;
   if (def.fillColor) el.style.backgroundColor = def.fillColor;
   if (def.rotation) {
-    el.style.transform = `rotate(${-def.rotation}deg)`;
+    el.style.transform = `rotate(${def.rotation}deg)`;
     el.style.transformOrigin = "center center";
   }
   return el;
@@ -1702,7 +1702,7 @@ function renderStampAnnotation(
   el.style.fontSize = `${24 * viewport.scale}px`;
   if (def.color) el.style.color = def.color;
   if (def.rotation) {
-    el.style.transform = `rotate(${-def.rotation}deg)`;
+    el.style.transform = `rotate(${def.rotation}deg)`;
     el.style.transformOrigin = "center center";
   }
   el.textContent = def.label;
@@ -3079,6 +3079,7 @@ async function downloadAnnotatedPdf(): Promise<void> {
                 })()
               : undefined,
             opacity: def.fillColor ? 0.3 : undefined,
+            rotate: def.rotation ? degrees(-def.rotation) : undefined,
           });
           break;
         }
@@ -3109,27 +3110,73 @@ async function downloadAnnotatedPdf(): Promise<void> {
           const padding = 8;
           const rectW = textWidth + padding * 2;
           const rectH = fontSize + padding * 2;
-          const rotation = def.rotation ? degrees(def.rotation) : undefined;
 
-          page.drawRectangle({
-            x: def.x,
-            y: def.y - rectH,
-            width: rectW,
-            height: rectH,
-            borderColor: stampColor,
-            borderWidth: 3,
-            opacity: 0.6,
-            rotate: rotation,
-          });
-          page.drawText(def.label, {
-            x: def.x + padding,
-            y: def.y - fontSize - padding + 4,
-            size: fontSize,
-            font: boldFont,
-            color: stampColor,
-            opacity: 0.6,
-            rotate: rotation,
-          });
+          // CSS renders stamp with transformOrigin: center center, at
+          // pdfPointToScreen(def.x, def.y) which maps to the top-left of the
+          // element in screen space. In PDF coords def.y is the top of the stamp,
+          // so the rect goes from (def.x, def.y - rectH) to (def.x + rectW, def.y).
+          // The center is at (def.x + rectW/2, def.y - rectH/2).
+          const cx = def.x + rectW / 2;
+          const cy = def.y - rectH / 2;
+
+          if (def.rotation) {
+            // Rotate around center: translate to center, rotate, translate back
+            const rad = (-def.rotation * Math.PI) / 180;
+            const cos = Math.cos(rad);
+            const sin = Math.sin(rad);
+
+            // Rect corners relative to center
+            const rx = -rectW / 2;
+            const ry = -rectH / 2;
+            // Rotated bottom-left corner
+            const newX = cx + rx * cos - ry * sin;
+            const newY = cy + rx * sin + ry * cos;
+
+            page.drawRectangle({
+              x: newX,
+              y: newY,
+              width: rectW,
+              height: rectH,
+              borderColor: stampColor,
+              borderWidth: 3,
+              opacity: 0.6,
+              rotate: degrees(-def.rotation),
+            });
+
+            // Text position relative to center
+            const tx = -rectW / 2 + padding;
+            const ty = -rectH / 2 + padding - 4;
+            const newTx = cx + tx * cos - ty * sin;
+            const newTy = cy + tx * sin + ty * cos;
+
+            page.drawText(def.label, {
+              x: newTx,
+              y: newTy,
+              size: fontSize,
+              font: boldFont,
+              color: stampColor,
+              opacity: 0.6,
+              rotate: degrees(-def.rotation),
+            });
+          } else {
+            page.drawRectangle({
+              x: def.x,
+              y: def.y - rectH,
+              width: rectW,
+              height: rectH,
+              borderColor: stampColor,
+              borderWidth: 3,
+              opacity: 0.6,
+            });
+            page.drawText(def.label, {
+              x: def.x + padding,
+              y: def.y - fontSize - padding + 4,
+              size: fontSize,
+              font: boldFont,
+              color: stampColor,
+              opacity: 0.6,
+            });
+          }
           break;
         }
       }
@@ -3664,6 +3711,16 @@ pageInputEl.addEventListener("keydown", (e) => {
   }
 });
 
+// Mousedown on text layer directly deselects annotations (catches cases where
+// annotation mousedown stopPropagation prevents bubbling to canvasContainerEl)
+textLayerEl.addEventListener("mousedown", () => {
+  if (selectedAnnotationIds.size > 0) selectAnnotation(null);
+  if (focusedFieldName) {
+    focusedFieldName = null;
+    updatePageContext();
+  }
+});
+
 // Click on empty area / text layer to deselect annotations and blur fields
 canvasContainerEl.addEventListener("mousedown", (e) => {
   const target = e.target as HTMLElement;
@@ -3804,12 +3861,14 @@ document.addEventListener("selectionchange", () => {
   selectionUpdateTimeout = setTimeout(() => {
     const sel = window.getSelection();
     const text = sel?.toString().trim();
-    if (text && text.length > 2) {
-      // Text selection deselects annotations and blurs fields
+    if (text) {
+      // Any text selection deselects annotations and blurs fields
       if (selectedAnnotationIds.size > 0) selectAnnotation(null);
       if (focusedFieldName) {
         focusedFieldName = null;
       }
+    }
+    if (text && text.length > 2) {
       log.info("Selection changed:", text.slice(0, 50));
       updatePageContext();
     }

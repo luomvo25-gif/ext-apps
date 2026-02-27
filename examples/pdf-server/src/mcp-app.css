@@ -500,6 +500,7 @@ body {
   box-sizing: border-box;
   pointer-events: auto;
   cursor: grab;
+  user-select: none;
 }
 
 .annotation-freetext {
@@ -508,6 +509,7 @@ body {
   white-space: pre-wrap;
   pointer-events: auto;
   cursor: grab;
+  user-select: none;
 }
 
 .annotation-stamp {
@@ -522,6 +524,7 @@ body {
   white-space: nowrap;
   pointer-events: auto;
   cursor: grab;
+  user-select: none;
 }
 
 /* Selection visuals */
