@@ -990,9 +990,9 @@ export function createServer(): McpServer {
     "display_pdf",
     {
       title: "Display PDF",
-      description: `Display an interactive PDF viewer for reading, annotating, and filling out PDF documents.
+      description: `Show and render a PDF in an interactive viewer. Use this to display, annotate, edit, and fill form fields in PDF documents.
 
-Use this tool when the user wants to view, read, annotate, or fill out a PDF.
+Use this tool when the user wants to view, read, annotate, edit, or fill out a PDF. The renderer displays the document with full annotation and form support.
 
 **CRITICAL — DO NOT call display_pdf again on an already-displayed PDF.** Use the \`interact\` tool with the viewUUID from the result instead. Calling display_pdf again discards the existing viewer and all its state.
 
