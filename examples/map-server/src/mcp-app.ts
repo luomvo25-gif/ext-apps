@@ -1145,6 +1145,11 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
     }
 
     case "route": {
+      // Note: routes render at actual coordinates. If an endpoint marker gets
+      // clustered, the route still points to the true location (geographically
+      // correct) but visually "detaches" from the cluster badge. A future
+      // refinement could exempt markers that match route waypoints from
+      // clustering (requires cross-referencing coords).
       if (def.points.length < 2) {
         log.warn("Route needs at least 2 points, got", def.points.length);
         break;
@@ -2094,11 +2099,14 @@ function flyToBbox(bbox: BoundingBox): void {
   });
 }
 
-/** Fly to fit all currently selected annotations (skips hidden ones). */
+/**
+ * Fly to fit all currently selected annotations. Includes hidden items so
+ * selecting a hidden marker still navigates to where it would appear.
+ */
 function flyToSelection(): void {
   const defs = [...selectedIds]
     .map((id) => annotationMap.get(id))
-    .filter((t): t is TrackedAnnotation => !!t && globalVisible && t.visible)
+    .filter((t): t is TrackedAnnotation => !!t)
     .map((t) => t.def);
   const bbox = combinedBbox(defs);
   if (bbox) flyToBbox(bbox);
