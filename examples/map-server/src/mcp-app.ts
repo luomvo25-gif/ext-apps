@@ -872,8 +872,10 @@ type MapCommand =
 /** Tracked annotation with its Cesium entities */
 interface TrackedAnnotation {
   def: AnnotationDef;
-  /** All Cesium entities owned by this annotation (point, polyline, polygon, label, etc.) */
-  entities: any[];
+  /** Entities in the clustered data source (markers only) */
+  clusteredEntities: any[];
+  /** Entities in viewer.entities (geometry, non-marker labels) */
+  viewerEntities: any[];
 }
 
 /** All annotations on the map, keyed by id */
@@ -987,12 +989,13 @@ function renderLabelImage(text: string): string {
  * Create a label billboard entity at a given position
  */
 function createLabelEntity(
+  entityCollection: any,
   position: any,
   text: string,
   verticalOffset: number = -12,
 ): any {
   const dpr = window.devicePixelRatio || 1;
-  return annotationDataSource.entities.add({
+  return entityCollection.add({
     position,
     billboard: {
       image: renderLabelImage(text),
@@ -1059,7 +1062,10 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
     removeAnnotation(cesiumViewer, def.id);
   }
 
-  const entities: any[] = [];
+  // Markers go into the clustered data source (so nearby markers merge).
+  // Routes/areas/circles go into viewer.entities (geometry can't be clustered).
+  const clusteredEntities: any[] = [];
+  const viewerEntities: any[] = [];
 
   switch (def.type) {
     case "marker": {
@@ -1068,25 +1074,31 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
         def.latitude,
       );
       const cesiumColor = parseCesiumColor(def.color || "red");
+      const dpr = window.devicePixelRatio || 1;
 
-      // Point entity (the colored dot)
-      entities.push(
-        annotationDataSource.entities.add({
-          position,
-          point: {
-            pixelSize: 12,
-            color: cesiumColor,
-            outlineColor: Cesium.Color.WHITE,
-            outlineWidth: 2,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          },
-        }),
-      );
+      // Single entity with point + billboard label so it counts as one for clustering
+      const entityOpts: any = {
+        position,
+        point: {
+          pixelSize: 12,
+          color: cesiumColor,
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 2,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      };
 
-      // Label entity (separate so it doesn't conflict with point rendering)
       if (def.label) {
-        entities.push(createLabelEntity(position, def.label));
+        entityOpts.billboard = {
+          image: renderLabelImage(def.label),
+          scale: 1 / dpr,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          pixelOffset: new Cesium.Cartesian2(0, -12),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        };
       }
+
+      clusteredEntities.push(annotationDataSource.entities.add(entityOpts));
       break;
     }
 
@@ -1108,8 +1120,8 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
           })
         : cesiumColor;
 
-      entities.push(
-        annotationDataSource.entities.add({
+      viewerEntities.push(
+        cesiumViewer.entities.add({
           polyline: {
             positions,
             width: def.width ?? 3,
@@ -1125,7 +1137,9 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
           mid.longitude,
           mid.latitude,
         );
-        entities.push(createLabelEntity(labelPos, def.label, 0));
+        viewerEntities.push(
+          createLabelEntity(cesiumViewer.entities, labelPos, def.label, 0),
+        );
       }
       break;
     }
@@ -1143,8 +1157,8 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
         ? parseCesiumColor(def.fillColor)
         : outlineColor.withAlpha(0.2);
 
-      entities.push(
-        annotationDataSource.entities.add({
+      viewerEntities.push(
+        cesiumViewer.entities.add({
           polygon: {
             hierarchy: positions,
             material: fillColor,
@@ -1158,7 +1172,9 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
       if (def.label) {
         const c = centroid(def.points);
         const labelPos = Cesium.Cartesian3.fromDegrees(c.longitude, c.latitude);
-        entities.push(createLabelEntity(labelPos, def.label, 0));
+        viewerEntities.push(
+          createLabelEntity(cesiumViewer.entities, labelPos, def.label, 0),
+        );
       }
       break;
     }
@@ -1173,8 +1189,8 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
         ? parseCesiumColor(def.fillColor)
         : outlineColor.withAlpha(0.15);
 
-      entities.push(
-        annotationDataSource.entities.add({
+      viewerEntities.push(
+        cesiumViewer.entities.add({
           position,
           ellipse: {
             semiMajorAxis: def.radiusKm * 1000,
@@ -1188,17 +1204,21 @@ function addAnnotation(cesiumViewer: any, def: AnnotationDef): void {
       );
 
       if (def.label) {
-        entities.push(createLabelEntity(position, def.label, 0));
+        viewerEntities.push(
+          createLabelEntity(cesiumViewer.entities, position, def.label, 0),
+        );
       }
       break;
     }
   }
 
-  annotationMap.set(def.id, { def, entities });
+  annotationMap.set(def.id, { def, clusteredEntities, viewerEntities });
   updateCopyButton();
   // Workaround: CesiumJS may not cluster entities until camera moves (issue #4536).
   // Toggle clustering off/on to force a re-cluster pass.
-  scheduleRecluster();
+  if (clusteredEntities.length > 0) {
+    scheduleRecluster();
+  }
   log.info("Added annotation", def.type, def.id);
 }
 
@@ -1238,14 +1258,17 @@ function updateAnnotation(cesiumViewer: any, update: AnnotationUpdate): void {
 /**
  * Remove an annotation from the map
  */
-function removeAnnotation(_cesiumViewer: any, id: string): void {
+function removeAnnotation(cesiumViewer: any, id: string): void {
   const tracked = annotationMap.get(id);
   if (!tracked) {
     log.warn("removeAnnotation: unknown id", id);
     return;
   }
-  for (const entity of tracked.entities) {
+  for (const entity of tracked.clusteredEntities) {
     annotationDataSource.entities.remove(entity);
+  }
+  for (const entity of tracked.viewerEntities) {
+    cesiumViewer.entities.remove(entity);
   }
   annotationMap.delete(id);
   updateCopyButton();
