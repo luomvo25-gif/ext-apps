@@ -706,7 +706,7 @@ body {
   right: -4px;
   min-width: 16px;
   height: 16px;
-  background: #e74c3c;
+  background: var(--accent, #2563eb);
   color: #fff;
   font-size: 0.65rem;
   font-weight: 600;

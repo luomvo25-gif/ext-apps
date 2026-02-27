@@ -526,6 +526,12 @@ function openSearch() {
   searchBarEl.style.display = "flex";
   updateSearchUI();
   searchInputEl.focus();
+  if (
+    annotationPanelOpen &&
+    annotationsPanelEl.classList.contains("floating")
+  ) {
+    applyFloatingPanelPosition();
+  }
   // Text extraction is handled by the background preloader
 }
 
@@ -533,6 +539,12 @@ function closeSearch() {
   if (!searchOpen) return;
   searchOpen = false;
   searchBarEl.style.display = "none";
+  if (
+    annotationPanelOpen &&
+    annotationsPanelEl.classList.contains("floating")
+  ) {
+    applyFloatingPanelPosition();
+  }
   searchQuery = "";
   searchInputEl.value = "";
   allMatches = [];
@@ -1712,7 +1724,6 @@ function addAnnotation(def: PdfAnnotationDef, skipUndo = false): void {
   if (def.page === currentPage) {
     renderAnnotationsForPage(currentPage);
   }
-  autoShowAnnotationPanel();
   updateAnnotationsBadge();
   renderAnnotationPanel();
 }
@@ -1766,9 +1777,14 @@ function applyFloatingPanelPosition(): void {
   el.style.bottom = "";
   el.style.left = "";
   el.style.right = "";
+  // When search bar is visible and panel is anchored top-right, offset below it
+  const searchBarOffset =
+    searchOpen && floatingPanelCorner === "top-right"
+      ? `${searchBarEl.offsetHeight + 2}px`
+      : "0";
   switch (floatingPanelCorner) {
     case "top-right":
-      el.style.top = "0";
+      el.style.top = searchBarOffset;
       el.style.right = "0";
       break;
     case "top-left":
@@ -1860,14 +1876,6 @@ function toggleAnnotationPanel(): void {
     /* ignore */
   }
   setAnnotationPanelOpen(annotationPanelUserPref);
-}
-
-function autoShowAnnotationPanel(): void {
-  // Only auto-show if user hasn't explicitly closed it
-  if (annotationPanelUserPref === false) return;
-  if (!annotationPanelOpen && sidebarItemCount() > 0) {
-    setAnnotationPanelOpen(true);
-  }
 }
 
 /** Total count of annotations + filled form fields for the sidebar badge. */
@@ -3478,19 +3486,34 @@ function nextPage() {
   goToPage(currentPage + 1);
 }
 
+function scrollSelectionIntoView(): void {
+  if (selectedAnnotationIds.size === 0) return;
+  // Use the first selected annotation's element
+  for (const id of selectedAnnotationIds) {
+    const tracked = annotationMap.get(id);
+    if (tracked && tracked.elements.length > 0) {
+      tracked.elements[0].scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+      break;
+    }
+  }
+}
+
 function zoomIn() {
   scale = Math.min(scale + 0.25, 3.0);
-  renderPage();
+  renderPage().then(scrollSelectionIntoView);
 }
 
 function zoomOut() {
   scale = Math.max(scale - 0.25, 0.5);
-  renderPage();
+  renderPage().then(scrollSelectionIntoView);
 }
 
 function resetZoom() {
   scale = 1.0;
-  renderPage();
+  renderPage().then(scrollSelectionIntoView);
 }
 
 async function toggleFullscreen() {
@@ -3514,9 +3537,13 @@ async function toggleFullscreen() {
 }
 
 function updateFullscreenButton() {
-  fullscreenBtn.textContent = currentDisplayMode === "fullscreen" ? "⛶" : "⛶";
-  fullscreenBtn.title =
-    currentDisplayMode === "fullscreen" ? "Exit fullscreen" : "Fullscreen";
+  if (currentDisplayMode === "fullscreen") {
+    fullscreenBtn.textContent = "⊠";
+    fullscreenBtn.title = "Exit fullscreen (Esc)";
+  } else {
+    fullscreenBtn.textContent = "⛶";
+    fullscreenBtn.title = "Toggle fullscreen";
+  }
 }
 
 // Event listeners
@@ -3637,16 +3664,22 @@ pageInputEl.addEventListener("keydown", (e) => {
   }
 });
 
-// Click on empty area to deselect annotations
+// Click on empty area / text layer to deselect annotations and blur fields
 canvasContainerEl.addEventListener("mousedown", (e) => {
-  // Only deselect if clicking directly on the container or page wrapper, not on an annotation
+  const target = e.target as HTMLElement;
+  // Deselect if clicking on container, canvas, page wrapper, or text layer content
   if (
-    e.target === canvasContainerEl ||
-    e.target === canvasEl ||
-    (e.target as HTMLElement).classList?.contains("page-wrapper")
+    target === canvasContainerEl ||
+    target === canvasEl ||
+    target.classList?.contains("page-wrapper") ||
+    target.closest(".text-layer")
   ) {
     if (selectedAnnotationIds.size > 0) {
       selectAnnotation(null);
+    }
+    if (focusedFieldName) {
+      focusedFieldName = null;
+      updatePageContext();
     }
   }
 });
@@ -3772,6 +3805,11 @@ document.addEventListener("selectionchange", () => {
     const sel = window.getSelection();
     const text = sel?.toString().trim();
     if (text && text.length > 2) {
+      // Text selection deselects annotations and blurs fields
+      if (selectedAnnotationIds.size > 0) selectAnnotation(null);
+      if (focusedFieldName) {
+        focusedFieldName = null;
+      }
       log.info("Selection changed:", text.slice(0, 50));
       updatePageContext();
     }
@@ -4124,7 +4162,6 @@ app.ontoolresult = async (result: CallToolResult) => {
     // Pre-populate annotationStorage from restored formFieldValues
     syncFormValuesToStorage();
 
-    autoShowAnnotationPanel();
     updateAnnotationsBadge();
     renderPage();
     // Start background preloading of all pages for text extraction
@@ -4399,6 +4436,5 @@ app.connect().then(() => {
   }
   // Restore annotations early using toolInfo.id (available before tool result)
   restoreAnnotations();
-  autoShowAnnotationPanel();
   updateAnnotationsBadge();
 });
