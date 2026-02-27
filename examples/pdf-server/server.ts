@@ -1097,7 +1097,7 @@ export function createServer(): McpServer {
       title: "Display PDF",
       description: `Show and render a PDF in an interactive viewer. Use this to display, annotate, edit, and fill form fields in PDF documents.
 
-Use this tool when the user wants to view, read, annotate, edit, or fill out a PDF. The renderer displays the document with full annotation and form support.
+Use this tool when the user wants to view, read, annotate, edit, sign, stamp, or fill out a PDF. The renderer displays the document with full annotation, signature/image placement, and form support.
 
 **CRITICAL — DO NOT call display_pdf again on an already-displayed PDF.** Use the \`interact\` tool with the viewUUID from the result instead. Calling display_pdf again discards the existing viewer and all its state.
 
@@ -1810,15 +1810,15 @@ Annotation types:
 • rectangle: x, y, width, height, color?, fillColor?, rotation? • circle: x, y, width, height, color?, fillColor?
 • line: x1, y1, x2, y2, color? • freetext: x, y, content, fontSize?, color?
 • stamp: x, y, label (any text, e.g. APPROVED, DRAFT, CONFIDENTIAL), color?, rotation?
-• image: imageUrl or imageData (base64 PNG/JPEG), x?, y?, width?, height?, mimeType?, rotation? — places an image on the page
+• image: imageUrl or imageData (base64 PNG/JPEG), x?, y?, width?, height?, mimeType?, rotation?, aspect? — places an image (signature, logo, etc.) on the page. imageUrl can be a local file path or HTTP(S) URL; the server fetches and embeds it automatically. Width/height auto-detected from image if omitted.
 
 TIP: For text annotations, prefer highlight_text (auto-finds text) over manual rects.
 
-Example — add annotations then screenshot to verify:
+Example — add a signature image and a stamp, then screenshot to verify:
 \`\`\`json
 {"viewUUID":"…","commands":[
   {"action":"add_annotations","annotations":[
-    {"id":"h1","type":"highlight","page":1,"rects":[{"x":72,"y":700,"width":200,"height":12}]},
+    {"id":"sig1","type":"image","page":1,"x":72,"y":700,"imageUrl":"/path/to/signature.png"},
     {"id":"s1","type":"stamp","page":1,"x":300,"y":400,"label":"APPROVED"}
   ]},
   {"action":"get_screenshot","page":1}
