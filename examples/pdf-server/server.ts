@@ -955,7 +955,18 @@ async function extractFormSchema(
 // MCP Server Factory
 // =============================================================================
 
-export function createServer(): McpServer {
+export interface CreateServerOptions {
+  /**
+   * Disable the `interact` tool and related command-queue infrastructure.
+   * Use this for distributed deployments where the command queue (in-memory)
+   * cannot be shared across server instances.
+   * When true, the server only exposes `list_pdfs` and `display_pdf` (read-only).
+   */
+  disableInteract?: boolean;
+}
+
+export function createServer(options?: CreateServerOptions): McpServer {
+  const disableInteract = options?.disableInteract ?? false;
   const server = new McpServer({ name: "PDF Server", version: "2.0.0" });
 
   // Fetch roots on initialization and subscribe to changes
@@ -1095,7 +1106,13 @@ export function createServer(): McpServer {
     "display_pdf",
     {
       title: "Display PDF",
-      description: `Show and render a PDF in an interactive viewer. Use this to display, annotate, edit, and fill form fields in PDF documents.
+      description: disableInteract
+        ? `Show and render a PDF in a read-only viewer.
+
+Use this tool when the user wants to view or read a PDF. The renderer displays the document for viewing.
+
+Accepts local files (use list_pdfs), client MCP root directories, or any HTTPS URL.`
+        : `Show and render a PDF in an interactive viewer. Use this to display, annotate, edit, and fill form fields in PDF documents.
 
 Use this tool when the user wants to view, read, annotate, edit, sign, stamp, or fill out a PDF. The renderer displays the document with full annotation, signature/image placement, and form support.
 
@@ -1115,17 +1132,24 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
           .default(DEFAULT_PDF)
           .describe("PDF URL or local file path"),
         page: z.number().min(1).default(1).describe("Initial page"),
-        elicit_form_inputs: z
-          .boolean()
-          .default(false)
-          .describe(
-            "If true and the PDF has form fields, prompt the user to fill them before displaying",
-          ),
+        ...(disableInteract
+          ? {}
+          : {
+              elicit_form_inputs: z
+                .boolean()
+                .default(false)
+                .describe(
+                  "If true and the PDF has form fields, prompt the user to fill them before displaying",
+                ),
+            }),
       },
       outputSchema: z.object({
         viewUUID: z
           .string()
-          .describe("UUID for this viewer instance — pass to interact tool"),
+          .describe(
+            "UUID for this viewer instance" +
+              (disableInteract ? "" : " — pass to interact tool"),
+          ),
         url: z.string(),
         initialPage: z.number(),
         totalBytes: z.number(),
@@ -1271,7 +1295,7 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
           list.push(f);
         }
         const lines: string[] = [
-          `\nForm fields (${fieldInfo.length}) — use fill_form with {name, value}:`,
+          `\nForm fields (${fieldInfo.length})${disableInteract ? "" : " — use fill_form with {name, value}"}:`,
         ];
         for (const [pg, fields] of [...byPage.entries()].sort(
           (a, b) => a[0] - b[0],
@@ -1292,7 +1316,7 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
         if (fieldNames && fieldNames.size > 0) {
           contentParts.push({
             type: "text",
-            text: `\nForm fields available for fill_form: ${[...fieldNames].join(", ")}`,
+            text: `\nForm fields${disableInteract ? "" : " available for fill_form"}: ${[...fieldNames].join(", ")}`,
           });
         }
       }
@@ -1314,485 +1338,490 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
     },
   );
 
-  // Schema for a single interact command (used in commands array)
-  const InteractCommandSchema = z.object({
-    action: z
-      .enum([
-        "navigate",
-        "search",
-        "find",
-        "search_navigate",
-        "zoom",
-        "add_annotations",
-        "update_annotations",
-        "remove_annotations",
-        "highlight_text",
-        "fill_form",
-        "get_text",
-        "get_screenshot",
-      ])
-      .describe("Action to perform"),
-    page: z
-      .number()
-      .min(1)
-      .optional()
-      .describe(
-        "Page number (for navigate, highlight_text, get_screenshot, get_text)",
-      ),
-    query: z
-      .string()
-      .optional()
-      .describe("Search text (for search / find / highlight_text)"),
-    matchIndex: z
-      .number()
-      .min(0)
-      .optional()
-      .describe("Match index (for search_navigate)"),
-    scale: z
-      .number()
-      .min(0.5)
-      .max(3.0)
-      .optional()
-      .describe("Zoom scale, 1.0 = 100% (for zoom)"),
-    annotations: z
-      .array(z.record(z.string(), z.any()))
-      .optional()
-      .describe(
-        "Annotation objects (see types in description). Each needs: id, type, page. For update_annotations only id+type are required.",
-      ),
-    ids: z
-      .array(z.string())
-      .optional()
-      .describe("Annotation IDs (for remove_annotations)"),
-    color: z
-      .string()
-      .optional()
-      .describe("Color override (for highlight_text)"),
-    content: z
-      .string()
-      .optional()
-      .describe("Tooltip/note content (for highlight_text)"),
-    fields: z
-      .array(FormField)
-      .optional()
-      .describe(
-        "Form fields to fill (for fill_form): { name, value } where value is string or boolean",
-      ),
-    intervals: z
-      .array(PageInterval)
-      .optional()
-      .describe(
-        "Page ranges for get_text. Each has optional start/end. [{start:1,end:5}], [{}] = all pages. Max 20 pages.",
-      ),
-  });
+  if (!disableInteract) {
+    // Schema for a single interact command (used in commands array)
+    const InteractCommandSchema = z.object({
+      action: z
+        .enum([
+          "navigate",
+          "search",
+          "find",
+          "search_navigate",
+          "zoom",
+          "add_annotations",
+          "update_annotations",
+          "remove_annotations",
+          "highlight_text",
+          "fill_form",
+          "get_text",
+          "get_screenshot",
+        ])
+        .describe("Action to perform"),
+      page: z
+        .number()
+        .min(1)
+        .optional()
+        .describe(
+          "Page number (for navigate, highlight_text, get_screenshot, get_text)",
+        ),
+      query: z
+        .string()
+        .optional()
+        .describe("Search text (for search / find / highlight_text)"),
+      matchIndex: z
+        .number()
+        .min(0)
+        .optional()
+        .describe("Match index (for search_navigate)"),
+      scale: z
+        .number()
+        .min(0.5)
+        .max(3.0)
+        .optional()
+        .describe("Zoom scale, 1.0 = 100% (for zoom)"),
+      annotations: z
+        .array(z.record(z.string(), z.any()))
+        .optional()
+        .describe(
+          "Annotation objects (see types in description). Each needs: id, type, page. For update_annotations only id+type are required.",
+        ),
+      ids: z
+        .array(z.string())
+        .optional()
+        .describe("Annotation IDs (for remove_annotations)"),
+      color: z
+        .string()
+        .optional()
+        .describe("Color override (for highlight_text)"),
+      content: z
+        .string()
+        .optional()
+        .describe("Tooltip/note content (for highlight_text)"),
+      fields: z
+        .array(FormField)
+        .optional()
+        .describe(
+          "Form fields to fill (for fill_form): { name, value } where value is string or boolean",
+        ),
+      intervals: z
+        .array(PageInterval)
+        .optional()
+        .describe(
+          "Page ranges for get_text. Each has optional start/end. [{start:1,end:5}], [{}] = all pages. Max 20 pages.",
+        ),
+    });
 
-  type InteractCommand = z.infer<typeof InteractCommandSchema>;
-  type ContentPart =
-    | { type: "text"; text: string }
-    | { type: "image"; data: string; mimeType: string };
+    type InteractCommand = z.infer<typeof InteractCommandSchema>;
+    type ContentPart =
+      | { type: "text"; text: string }
+      | { type: "image"; data: string; mimeType: string };
 
-  /**
-   * Resolve an image annotation: fetch imageUrl → imageData if needed,
-   * auto-detect dimensions, and set defaults for x/y.
-   */
-  async function resolveImageAnnotation(
-    ann: Record<string, any>,
-  ): Promise<void> {
-    // Fetch image data from URL if no imageData provided
-    if (!ann.imageData && ann.imageUrl) {
-      try {
-        let imgBytes: Uint8Array;
-        const url = ann.imageUrl as string;
-        if (url.startsWith("http://") || url.startsWith("https://")) {
-          const resp = await fetch(url);
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-          imgBytes = new Uint8Array(await resp.arrayBuffer());
-        } else {
-          // Treat as file path
-          imgBytes = await fs.promises.readFile(url);
+    /**
+     * Resolve an image annotation: fetch imageUrl → imageData if needed,
+     * auto-detect dimensions, and set defaults for x/y.
+     */
+    async function resolveImageAnnotation(
+      ann: Record<string, any>,
+    ): Promise<void> {
+      // Fetch image data from URL if no imageData provided
+      if (!ann.imageData && ann.imageUrl) {
+        try {
+          let imgBytes: Uint8Array;
+          const url = ann.imageUrl as string;
+          if (url.startsWith("http://") || url.startsWith("https://")) {
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            imgBytes = new Uint8Array(await resp.arrayBuffer());
+          } else {
+            // Treat as file path
+            imgBytes = await fs.promises.readFile(url);
+          }
+          ann.imageData = Buffer.from(imgBytes).toString("base64");
+        } catch (err) {
+          console.error(`Failed to fetch image from ${ann.imageUrl}:`, err);
         }
-        ann.imageData = Buffer.from(imgBytes).toString("base64");
-      } catch (err) {
-        console.error(`Failed to fetch image from ${ann.imageUrl}:`, err);
       }
+
+      // Auto-detect mimeType from magic bytes if not set
+      if (ann.imageData && !ann.mimeType) {
+        const bytes = Buffer.from(ann.imageData, "base64");
+        if (
+          bytes[0] === 0x89 &&
+          bytes[1] === 0x50 &&
+          bytes[2] === 0x4e &&
+          bytes[3] === 0x47
+        ) {
+          ann.mimeType = "image/png";
+        } else {
+          ann.mimeType = "image/jpeg";
+        }
+      }
+
+      // Auto-detect dimensions from image if not specified
+      if (ann.imageData && (ann.width == null || ann.height == null)) {
+        const dims = detectImageDimensions(
+          Buffer.from(ann.imageData, "base64"),
+        );
+        if (dims) {
+          const maxWidth = 200; // default max width in PDF points
+          const aspectRatio = dims.height / dims.width;
+          ann.width = ann.width ?? Math.min(dims.width, maxWidth);
+          ann.height = ann.height ?? ann.width * aspectRatio;
+        } else {
+          ann.width = ann.width ?? 200;
+          ann.height = ann.height ?? 200;
+        }
+      }
+
+      // Default position if not specified
+      ann.x = ann.x ?? 72;
+      ann.y = ann.y ?? 72;
     }
 
-    // Auto-detect mimeType from magic bytes if not set
-    if (ann.imageData && !ann.mimeType) {
-      const bytes = Buffer.from(ann.imageData, "base64");
+    /**
+     * Detect image dimensions from PNG or JPEG bytes.
+     */
+    function detectImageDimensions(
+      bytes: Buffer,
+    ): { width: number; height: number } | null {
+      // PNG: width at offset 16 (4 bytes BE), height at offset 20 (4 bytes BE)
       if (
         bytes[0] === 0x89 &&
         bytes[1] === 0x50 &&
         bytes[2] === 0x4e &&
         bytes[3] === 0x47
       ) {
-        ann.mimeType = "image/png";
-      } else {
-        ann.mimeType = "image/jpeg";
-      }
-    }
-
-    // Auto-detect dimensions from image if not specified
-    if (ann.imageData && (ann.width == null || ann.height == null)) {
-      const dims = detectImageDimensions(Buffer.from(ann.imageData, "base64"));
-      if (dims) {
-        const maxWidth = 200; // default max width in PDF points
-        const aspectRatio = dims.height / dims.width;
-        ann.width = ann.width ?? Math.min(dims.width, maxWidth);
-        ann.height = ann.height ?? ann.width * aspectRatio;
-      } else {
-        ann.width = ann.width ?? 200;
-        ann.height = ann.height ?? 200;
-      }
-    }
-
-    // Default position if not specified
-    ann.x = ann.x ?? 72;
-    ann.y = ann.y ?? 72;
-  }
-
-  /**
-   * Detect image dimensions from PNG or JPEG bytes.
-   */
-  function detectImageDimensions(
-    bytes: Buffer,
-  ): { width: number; height: number } | null {
-    // PNG: width at offset 16 (4 bytes BE), height at offset 20 (4 bytes BE)
-    if (
-      bytes[0] === 0x89 &&
-      bytes[1] === 0x50 &&
-      bytes[2] === 0x4e &&
-      bytes[3] === 0x47
-    ) {
-      if (bytes.length >= 24) {
-        const width = bytes.readUInt32BE(16);
-        const height = bytes.readUInt32BE(20);
-        return { width, height };
-      }
-    }
-    // JPEG: scan for SOF0/SOF2 markers (0xFF 0xC0 / 0xFF 0xC2)
-    if (bytes[0] === 0xff && bytes[1] === 0xd8) {
-      let offset = 2;
-      while (offset < bytes.length - 8) {
-        if (bytes[offset] !== 0xff) break;
-        const marker = bytes[offset + 1];
-        if (marker === 0xc0 || marker === 0xc2) {
-          const height = bytes.readUInt16BE(offset + 5);
-          const width = bytes.readUInt16BE(offset + 7);
+        if (bytes.length >= 24) {
+          const width = bytes.readUInt32BE(16);
+          const height = bytes.readUInt32BE(20);
           return { width, height };
         }
-        const segLen = bytes.readUInt16BE(offset + 2);
-        offset += 2 + segLen;
       }
+      // JPEG: scan for SOF0/SOF2 markers (0xFF 0xC0 / 0xFF 0xC2)
+      if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+        let offset = 2;
+        while (offset < bytes.length - 8) {
+          if (bytes[offset] !== 0xff) break;
+          const marker = bytes[offset + 1];
+          if (marker === 0xc0 || marker === 0xc2) {
+            const height = bytes.readUInt16BE(offset + 5);
+            const width = bytes.readUInt16BE(offset + 7);
+            return { width, height };
+          }
+          const segLen = bytes.readUInt16BE(offset + 2);
+          offset += 2 + segLen;
+        }
+      }
+      return null;
     }
-    return null;
-  }
 
-  /** Process a single interact command. Returns content parts and an isError flag. */
-  async function processInteractCommand(
-    uuid: string,
-    cmd: InteractCommand,
-  ): Promise<{ content: ContentPart[]; isError?: boolean }> {
-    const {
-      action,
-      page,
-      query,
-      matchIndex,
-      scale,
-      annotations,
-      ids,
-      color,
-      content,
-      fields,
-      intervals,
-    } = cmd;
+    /** Process a single interact command. Returns content parts and an isError flag. */
+    async function processInteractCommand(
+      uuid: string,
+      cmd: InteractCommand,
+    ): Promise<{ content: ContentPart[]; isError?: boolean }> {
+      const {
+        action,
+        page,
+        query,
+        matchIndex,
+        scale,
+        annotations,
+        ids,
+        color,
+        content,
+        fields,
+        intervals,
+      } = cmd;
 
-    let description: string;
-    switch (action) {
-      case "navigate":
-        if (page == null)
-          return {
-            content: [{ type: "text", text: "navigate requires `page`" }],
-            isError: true,
-          };
-        enqueueCommand(uuid, { type: "navigate", page });
-        description = `navigate to page ${page}`;
-        break;
-      case "search":
-        if (!query)
-          return {
-            content: [{ type: "text", text: "search requires `query`" }],
-            isError: true,
-          };
-        enqueueCommand(uuid, { type: "search", query });
-        description = `search for "${query}"`;
-        break;
-      case "find":
-        if (!query)
-          return {
-            content: [{ type: "text", text: "find requires `query`" }],
-            isError: true,
-          };
-        enqueueCommand(uuid, { type: "find", query });
-        description = `find "${query}" (silent)`;
-        break;
-      case "search_navigate":
-        if (matchIndex == null)
-          return {
-            content: [
-              {
-                type: "text",
-                text: "search_navigate requires `matchIndex`",
-              },
-            ],
-            isError: true,
-          };
-        enqueueCommand(uuid, { type: "search_navigate", matchIndex });
-        description = `go to match #${matchIndex}`;
-        break;
-      case "zoom":
-        if (scale == null)
-          return {
-            content: [{ type: "text", text: "zoom requires `scale`" }],
-            isError: true,
-          };
-        enqueueCommand(uuid, { type: "zoom", scale });
-        description = `zoom to ${Math.round(scale * 100)}%`;
-        break;
-      case "add_annotations":
-        if (!annotations || annotations.length === 0)
-          return {
-            content: [
-              {
-                type: "text",
-                text: "add_annotations requires `annotations` array",
-              },
-            ],
-            isError: true,
-          };
-        // Resolve image annotations: fetch imageUrl → imageData, auto-detect dimensions
-        for (const ann of annotations) {
-          if ((ann as any).type === "image") {
-            await resolveImageAnnotation(ann as any);
+      let description: string;
+      switch (action) {
+        case "navigate":
+          if (page == null)
+            return {
+              content: [{ type: "text", text: "navigate requires `page`" }],
+              isError: true,
+            };
+          enqueueCommand(uuid, { type: "navigate", page });
+          description = `navigate to page ${page}`;
+          break;
+        case "search":
+          if (!query)
+            return {
+              content: [{ type: "text", text: "search requires `query`" }],
+              isError: true,
+            };
+          enqueueCommand(uuid, { type: "search", query });
+          description = `search for "${query}"`;
+          break;
+        case "find":
+          if (!query)
+            return {
+              content: [{ type: "text", text: "find requires `query`" }],
+              isError: true,
+            };
+          enqueueCommand(uuid, { type: "find", query });
+          description = `find "${query}" (silent)`;
+          break;
+        case "search_navigate":
+          if (matchIndex == null)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "search_navigate requires `matchIndex`",
+                },
+              ],
+              isError: true,
+            };
+          enqueueCommand(uuid, { type: "search_navigate", matchIndex });
+          description = `go to match #${matchIndex}`;
+          break;
+        case "zoom":
+          if (scale == null)
+            return {
+              content: [{ type: "text", text: "zoom requires `scale`" }],
+              isError: true,
+            };
+          enqueueCommand(uuid, { type: "zoom", scale });
+          description = `zoom to ${Math.round(scale * 100)}%`;
+          break;
+        case "add_annotations":
+          if (!annotations || annotations.length === 0)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "add_annotations requires `annotations` array",
+                },
+              ],
+              isError: true,
+            };
+          // Resolve image annotations: fetch imageUrl → imageData, auto-detect dimensions
+          for (const ann of annotations) {
+            if ((ann as any).type === "image") {
+              await resolveImageAnnotation(ann as any);
+            }
           }
-        }
-        enqueueCommand(uuid, {
-          type: "add_annotations",
-          annotations: annotations as z.infer<typeof PdfAnnotationDef>[],
-        });
-        description = `add ${annotations.length} annotation(s)`;
-        break;
-      case "update_annotations":
-        if (!annotations || annotations.length === 0)
-          return {
-            content: [
-              {
-                type: "text",
-                text: "update_annotations requires `annotations` array",
-              },
-            ],
-            isError: true,
-          };
-        enqueueCommand(uuid, {
-          type: "update_annotations",
-          annotations: annotations as z.infer<typeof PdfAnnotationUpdate>[],
-        });
-        description = `update ${annotations.length} annotation(s)`;
-        break;
-      case "remove_annotations":
-        if (!ids || ids.length === 0)
-          return {
-            content: [
-              {
-                type: "text",
-                text: "remove_annotations requires `ids` array",
-              },
-            ],
-            isError: true,
-          };
-        enqueueCommand(uuid, { type: "remove_annotations", ids });
-        description = `remove ${ids.length} annotation(s)`;
-        break;
-      case "highlight_text": {
-        if (!query)
-          return {
-            content: [
-              { type: "text", text: "highlight_text requires `query`" },
-            ],
-            isError: true,
-          };
-        const id = `ht_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        enqueueCommand(uuid, {
-          type: "highlight_text",
-          id,
-          query,
-          page,
-          color,
-          content,
-        });
-        description = `highlight text "${query}"${page ? ` on page ${page}` : ""}`;
-        break;
-      }
-      case "fill_form": {
-        if (!fields || fields.length === 0)
-          return {
-            content: [
-              { type: "text", text: "fill_form requires `fields` array" },
-            ],
-            isError: true,
-          };
-        const knownFields = viewFieldNames.get(uuid);
-        const validFields: typeof fields = [];
-        const unknownNames: string[] = [];
-        for (const f of fields) {
-          if (knownFields && !knownFields.has(f.name)) {
-            unknownNames.push(f.name);
-          } else {
-            validFields.push(f);
-          }
-        }
-        if (validFields.length > 0) {
-          enqueueCommand(uuid, { type: "fill_form", fields: validFields });
-        }
-        const parts: string[] = [];
-        if (validFields.length > 0) {
-          parts.push(
-            `Filled ${validFields.length} field(s): ${validFields.map((f) => f.name).join(", ")}`,
-          );
-        }
-        if (unknownNames.length > 0) {
-          parts.push(`Unknown field(s) skipped: ${unknownNames.join(", ")}`);
-        }
-        // Include full field listing so the model can correct its fill_form calls
-        const info = viewFieldInfo.get(uuid);
-        if (info && info.length > 0) {
-          const fieldLines = info.map((f) => {
-            const label = f.label ? ` "${f.label}"` : "";
-            const nameStr = f.name || "(unnamed)";
-            return `  p${f.page}: ${nameStr}${label} [${f.type}] at (${f.x},${f.y}) ${f.width}×${f.height}`;
+          enqueueCommand(uuid, {
+            type: "add_annotations",
+            annotations: annotations as z.infer<typeof PdfAnnotationDef>[],
           });
-          parts.push(`All form fields:\n${fieldLines.join("\n")}`);
-        } else if (knownFields && knownFields.size > 0) {
-          parts.push(`Valid field names: ${[...knownFields].join(", ")}`);
+          description = `add ${annotations.length} annotation(s)`;
+          break;
+        case "update_annotations":
+          if (!annotations || annotations.length === 0)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "update_annotations requires `annotations` array",
+                },
+              ],
+              isError: true,
+            };
+          enqueueCommand(uuid, {
+            type: "update_annotations",
+            annotations: annotations as z.infer<typeof PdfAnnotationUpdate>[],
+          });
+          description = `update ${annotations.length} annotation(s)`;
+          break;
+        case "remove_annotations":
+          if (!ids || ids.length === 0)
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: "remove_annotations requires `ids` array",
+                },
+              ],
+              isError: true,
+            };
+          enqueueCommand(uuid, { type: "remove_annotations", ids });
+          description = `remove ${ids.length} annotation(s)`;
+          break;
+        case "highlight_text": {
+          if (!query)
+            return {
+              content: [
+                { type: "text", text: "highlight_text requires `query`" },
+              ],
+              isError: true,
+            };
+          const id = `ht_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          enqueueCommand(uuid, {
+            type: "highlight_text",
+            id,
+            query,
+            page,
+            color,
+            content,
+          });
+          description = `highlight text "${query}"${page ? ` on page ${page}` : ""}`;
+          break;
         }
-        description = parts.join(". ");
-        if (unknownNames.length > 0 && validFields.length === 0) {
-          return {
-            content: [{ type: "text", text: description }],
-            isError: true,
-          };
-        }
-        break;
-      }
-      case "get_text": {
-        const resolvedIntervals =
-          intervals ?? (page ? [{ start: page, end: page }] : [{}]);
-
-        const requestId = randomUUID();
-
-        enqueueCommand(uuid, {
-          type: "get_pages",
-          requestId,
-          intervals: resolvedIntervals,
-          getText: true,
-          getScreenshots: false,
-        });
-
-        let pageData: PageDataEntry[];
-        try {
-          pageData = await waitForPageData(requestId);
-        } catch (err) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error: ${err instanceof Error ? err.message : String(err)}`,
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        const textParts: ContentPart[] = [];
-        for (const entry of pageData) {
-          if (entry.text != null) {
-            textParts.push({
-              type: "text",
-              text: `--- Page ${entry.page} ---\n${entry.text}`,
-            });
+        case "fill_form": {
+          if (!fields || fields.length === 0)
+            return {
+              content: [
+                { type: "text", text: "fill_form requires `fields` array" },
+              ],
+              isError: true,
+            };
+          const knownFields = viewFieldNames.get(uuid);
+          const validFields: typeof fields = [];
+          const unknownNames: string[] = [];
+          for (const f of fields) {
+            if (knownFields && !knownFields.has(f.name)) {
+              unknownNames.push(f.name);
+            } else {
+              validFields.push(f);
+            }
           }
+          if (validFields.length > 0) {
+            enqueueCommand(uuid, { type: "fill_form", fields: validFields });
+          }
+          const parts: string[] = [];
+          if (validFields.length > 0) {
+            parts.push(
+              `Filled ${validFields.length} field(s): ${validFields.map((f) => f.name).join(", ")}`,
+            );
+          }
+          if (unknownNames.length > 0) {
+            parts.push(`Unknown field(s) skipped: ${unknownNames.join(", ")}`);
+          }
+          // Include full field listing so the model can correct its fill_form calls
+          const info = viewFieldInfo.get(uuid);
+          if (info && info.length > 0) {
+            const fieldLines = info.map((f) => {
+              const label = f.label ? ` "${f.label}"` : "";
+              const nameStr = f.name || "(unnamed)";
+              return `  p${f.page}: ${nameStr}${label} [${f.type}] at (${f.x},${f.y}) ${f.width}×${f.height}`;
+            });
+            parts.push(`All form fields:\n${fieldLines.join("\n")}`);
+          } else if (knownFields && knownFields.size > 0) {
+            parts.push(`Valid field names: ${[...knownFields].join(", ")}`);
+          }
+          description = parts.join(". ");
+          if (unknownNames.length > 0 && validFields.length === 0) {
+            return {
+              content: [{ type: "text", text: description }],
+              isError: true,
+            };
+          }
+          break;
         }
-        if (textParts.length === 0) {
-          textParts.push({ type: "text", text: "No text content returned" });
-        }
-        return { content: textParts };
-      }
-      case "get_screenshot": {
-        if (page == null)
-          return {
-            content: [{ type: "text", text: "get_screenshot requires `page`" }],
-            isError: true,
-          };
+        case "get_text": {
+          const resolvedIntervals =
+            intervals ?? (page ? [{ start: page, end: page }] : [{}]);
 
-        const requestId = randomUUID();
+          const requestId = randomUUID();
 
-        enqueueCommand(uuid, {
-          type: "get_pages",
-          requestId,
-          intervals: [{ start: page, end: page }],
-          getText: false,
-          getScreenshots: true,
-        });
+          enqueueCommand(uuid, {
+            type: "get_pages",
+            requestId,
+            intervals: resolvedIntervals,
+            getText: true,
+            getScreenshots: false,
+          });
 
-        let pageData: PageDataEntry[];
-        try {
-          pageData = await waitForPageData(requestId);
-        } catch (err) {
-          return {
-            content: [
-              {
+          let pageData: PageDataEntry[];
+          try {
+            pageData = await waitForPageData(requestId);
+          } catch (err) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const textParts: ContentPart[] = [];
+          for (const entry of pageData) {
+            if (entry.text != null) {
+              textParts.push({
                 type: "text",
-                text: `Error: ${err instanceof Error ? err.message : String(err)}`,
-              },
-            ],
+                text: `--- Page ${entry.page} ---\n${entry.text}`,
+              });
+            }
+          }
+          if (textParts.length === 0) {
+            textParts.push({ type: "text", text: "No text content returned" });
+          }
+          return { content: textParts };
+        }
+        case "get_screenshot": {
+          if (page == null)
+            return {
+              content: [
+                { type: "text", text: "get_screenshot requires `page`" },
+              ],
+              isError: true,
+            };
+
+          const requestId = randomUUID();
+
+          enqueueCommand(uuid, {
+            type: "get_pages",
+            requestId,
+            intervals: [{ start: page, end: page }],
+            getText: false,
+            getScreenshots: true,
+          });
+
+          let pageData: PageDataEntry[];
+          try {
+            pageData = await waitForPageData(requestId);
+          } catch (err) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const entry = pageData[0];
+          if (entry?.image) {
+            return {
+              content: [
+                {
+                  type: "image",
+                  data: entry.image,
+                  mimeType: "image/jpeg",
+                },
+              ],
+            };
+          }
+          return {
+            content: [{ type: "text", text: "No screenshot returned" }],
             isError: true,
           };
         }
-
-        const entry = pageData[0];
-        if (entry?.image) {
+        default:
           return {
-            content: [
-              {
-                type: "image",
-                data: entry.image,
-                mimeType: "image/jpeg",
-              },
-            ],
+            content: [{ type: "text", text: `Unknown action: ${action}` }],
+            isError: true,
           };
-        }
-        return {
-          content: [{ type: "text", text: "No screenshot returned" }],
-          isError: true,
-        };
       }
-      default:
-        return {
-          content: [{ type: "text", text: `Unknown action: ${action}` }],
-          isError: true,
-        };
+      return {
+        content: [{ type: "text", text: `Queued: ${description}` }],
+      };
     }
-    return {
-      content: [{ type: "text", text: `Queued: ${description}` }],
-    };
-  }
 
-  // Tool: interact - Interact with an existing PDF viewer
-  server.registerTool(
-    "interact",
-    {
-      title: "Interact with PDF",
-      description: `Interact with a PDF viewer: annotate, navigate, search, extract text/screenshots, fill forms.
+    // Tool: interact - Interact with an existing PDF viewer
+    server.registerTool(
+      "interact",
+      {
+        title: "Interact with PDF",
+        description: `Interact with a PDF viewer: annotate, navigate, search, extract text/screenshots, fill forms.
 IMPORTANT: viewUUID must be the exact UUID returned by display_pdf (e.g. "a1b2c3d4-..."). Do NOT use arbitrary strings.
 
 **BATCHING**: Send multiple commands in one call via \`commands\` array. Commands run sequentially. TIP: End with \`get_screenshot\` to verify your changes.
@@ -1835,247 +1864,250 @@ Example — add a signature image and a stamp, then screenshot to verify:
 • get_screenshot: capture a single page as PNG image. Requires \`page\`.
 
 **FORMS** — fill_form: fill fields with \`fields\` array of {name, value}.`,
-      inputSchema: {
-        viewUUID: z
-          .string()
-          .describe("The viewUUID of the PDF viewer (from display_pdf result)"),
-        // Single-command mode (backwards-compatible)
-        action: z
-          .enum([
-            "navigate",
-            "search",
-            "find",
-            "search_navigate",
-            "zoom",
-            "add_annotations",
-            "update_annotations",
-            "remove_annotations",
-            "highlight_text",
-            "fill_form",
-            "get_text",
-            "get_screenshot",
-          ])
-          .optional()
-          .describe(
-            "Action to perform (for single command). Use `commands` array for batching.",
-          ),
-        page: z
-          .number()
-          .min(1)
-          .optional()
-          .describe(
-            "Page number (for navigate, highlight_text, get_screenshot, get_text)",
-          ),
-        query: z
-          .string()
-          .optional()
-          .describe("Search text (for search / find / highlight_text)"),
-        matchIndex: z
-          .number()
-          .min(0)
-          .optional()
-          .describe("Match index (for search_navigate)"),
-        scale: z
-          .number()
-          .min(0.5)
-          .max(3.0)
-          .optional()
-          .describe("Zoom scale, 1.0 = 100% (for zoom)"),
-        annotations: z
-          .array(z.record(z.string(), z.any()))
-          .optional()
-          .describe(
-            "Annotation objects (see types in description). Each needs: id, type, page. For update_annotations only id+type are required.",
-          ),
-        ids: z
-          .array(z.string())
-          .optional()
-          .describe("Annotation IDs (for remove_annotations)"),
-        color: z
-          .string()
-          .optional()
-          .describe("Color override (for highlight_text)"),
-        content: z
-          .string()
-          .optional()
-          .describe("Tooltip/note content (for highlight_text)"),
-        fields: z
-          .array(FormField)
-          .optional()
-          .describe(
-            "Form fields to fill (for fill_form): { name, value } where value is string or boolean",
-          ),
-        intervals: z
-          .array(PageInterval)
-          .optional()
-          .describe(
-            "Page ranges for get_text. Each has optional start/end. [{start:1,end:5}], [{}] = all pages. Max 20 pages.",
-          ),
-        // Batch mode
-        commands: z
-          .array(InteractCommandSchema)
-          .optional()
-          .describe(
-            "Array of commands to execute sequentially. More efficient than separate calls. Tip: end with get_pages+getScreenshots to verify changes.",
-          ),
+        inputSchema: {
+          viewUUID: z
+            .string()
+            .describe(
+              "The viewUUID of the PDF viewer (from display_pdf result)",
+            ),
+          // Single-command mode (backwards-compatible)
+          action: z
+            .enum([
+              "navigate",
+              "search",
+              "find",
+              "search_navigate",
+              "zoom",
+              "add_annotations",
+              "update_annotations",
+              "remove_annotations",
+              "highlight_text",
+              "fill_form",
+              "get_text",
+              "get_screenshot",
+            ])
+            .optional()
+            .describe(
+              "Action to perform (for single command). Use `commands` array for batching.",
+            ),
+          page: z
+            .number()
+            .min(1)
+            .optional()
+            .describe(
+              "Page number (for navigate, highlight_text, get_screenshot, get_text)",
+            ),
+          query: z
+            .string()
+            .optional()
+            .describe("Search text (for search / find / highlight_text)"),
+          matchIndex: z
+            .number()
+            .min(0)
+            .optional()
+            .describe("Match index (for search_navigate)"),
+          scale: z
+            .number()
+            .min(0.5)
+            .max(3.0)
+            .optional()
+            .describe("Zoom scale, 1.0 = 100% (for zoom)"),
+          annotations: z
+            .array(z.record(z.string(), z.any()))
+            .optional()
+            .describe(
+              "Annotation objects (see types in description). Each needs: id, type, page. For update_annotations only id+type are required.",
+            ),
+          ids: z
+            .array(z.string())
+            .optional()
+            .describe("Annotation IDs (for remove_annotations)"),
+          color: z
+            .string()
+            .optional()
+            .describe("Color override (for highlight_text)"),
+          content: z
+            .string()
+            .optional()
+            .describe("Tooltip/note content (for highlight_text)"),
+          fields: z
+            .array(FormField)
+            .optional()
+            .describe(
+              "Form fields to fill (for fill_form): { name, value } where value is string or boolean",
+            ),
+          intervals: z
+            .array(PageInterval)
+            .optional()
+            .describe(
+              "Page ranges for get_text. Each has optional start/end. [{start:1,end:5}], [{}] = all pages. Max 20 pages.",
+            ),
+          // Batch mode
+          commands: z
+            .array(InteractCommandSchema)
+            .optional()
+            .describe(
+              "Array of commands to execute sequentially. More efficient than separate calls. Tip: end with get_pages+getScreenshots to verify changes.",
+            ),
+        },
       },
-    },
-    async ({
-      viewUUID: uuid,
-      action,
-      page,
-      query,
-      matchIndex,
-      scale,
-      annotations,
-      ids,
-      color,
-      content,
-      fields,
-      intervals,
-      commands,
-    }): Promise<CallToolResult> => {
-      // Build the list of commands to process
-      const commandList: InteractCommand[] = commands
-        ? commands
-        : action
-          ? [
-              {
-                action,
-                page,
-                query,
-                matchIndex,
-                scale,
-                annotations,
-                ids,
-                color,
-                content,
-                fields,
-                intervals,
-              },
-            ]
-          : [];
+      async ({
+        viewUUID: uuid,
+        action,
+        page,
+        query,
+        matchIndex,
+        scale,
+        annotations,
+        ids,
+        color,
+        content,
+        fields,
+        intervals,
+        commands,
+      }): Promise<CallToolResult> => {
+        // Build the list of commands to process
+        const commandList: InteractCommand[] = commands
+          ? commands
+          : action
+            ? [
+                {
+                  action,
+                  page,
+                  query,
+                  matchIndex,
+                  scale,
+                  annotations,
+                  ids,
+                  color,
+                  content,
+                  fields,
+                  intervals,
+                },
+              ]
+            : [];
 
-      if (commandList.length === 0) {
+        if (commandList.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "No action or commands specified. Provide either `action` (single command) or `commands` (batch).",
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        // Process commands sequentially, collecting all content parts
+        const allContent: ContentPart[] = [];
+        let hasError = false;
+
+        for (let i = 0; i < commandList.length; i++) {
+          const result = await processInteractCommand(uuid, commandList[i]);
+          if (result.isError) {
+            hasError = true;
+          }
+          allContent.push(...result.content);
+          if (hasError) break; // Stop on first error
+        }
+
+        return {
+          content: allContent,
+          ...(hasError ? { isError: true } : {}),
+        };
+      },
+    );
+
+    // Tool: submit_page_data (app-only) - Client submits rendered page data
+    registerAppTool(
+      server,
+      "submit_page_data",
+      {
+        title: "Submit Page Data",
+        description:
+          "Submit rendered page data for a get_pages request (used by viewer)",
+        inputSchema: {
+          requestId: z
+            .string()
+            .describe("The request ID from the get_pages command"),
+          pages: z
+            .array(
+              z.object({
+                page: z.number(),
+                text: z.string().optional(),
+                image: z.string().optional().describe("Base64 PNG image data"),
+              }),
+            )
+            .describe("Page data entries"),
+        },
+        _meta: { ui: { visibility: ["app"] } },
+      },
+      async ({ requestId, pages }): Promise<CallToolResult> => {
+        const pending = pendingPageRequests.get(requestId);
+        if (pending) {
+          clearTimeout(pending.timer);
+          pendingPageRequests.delete(requestId);
+          pending.resolve(pages);
+          return {
+            content: [
+              { type: "text", text: `Submitted ${pages.length} page(s)` },
+            ],
+          };
+        }
         return {
           content: [
-            {
-              type: "text",
-              text: "No action or commands specified. Provide either `action` (single command) or `commands` (batch).",
-            },
+            { type: "text", text: `No pending request for ${requestId}` },
           ],
           isError: true,
         };
-      }
-
-      // Process commands sequentially, collecting all content parts
-      const allContent: ContentPart[] = [];
-      let hasError = false;
-
-      for (let i = 0; i < commandList.length; i++) {
-        const result = await processInteractCommand(uuid, commandList[i]);
-        if (result.isError) {
-          hasError = true;
-        }
-        allContent.push(...result.content);
-        if (hasError) break; // Stop on first error
-      }
-
-      return {
-        content: allContent,
-        ...(hasError ? { isError: true } : {}),
-      };
-    },
-  );
-
-  // Tool: submit_page_data (app-only) - Client submits rendered page data
-  registerAppTool(
-    server,
-    "submit_page_data",
-    {
-      title: "Submit Page Data",
-      description:
-        "Submit rendered page data for a get_pages request (used by viewer)",
-      inputSchema: {
-        requestId: z
-          .string()
-          .describe("The request ID from the get_pages command"),
-        pages: z
-          .array(
-            z.object({
-              page: z.number(),
-              text: z.string().optional(),
-              image: z.string().optional().describe("Base64 PNG image data"),
-            }),
-          )
-          .describe("Page data entries"),
       },
-      _meta: { ui: { visibility: ["app"] } },
-    },
-    async ({ requestId, pages }): Promise<CallToolResult> => {
-      const pending = pendingPageRequests.get(requestId);
-      if (pending) {
-        clearTimeout(pending.timer);
-        pendingPageRequests.delete(requestId);
-        pending.resolve(pages);
-        return {
-          content: [
-            { type: "text", text: `Submitted ${pages.length} page(s)` },
-          ],
-        };
-      }
-      return {
-        content: [
-          { type: "text", text: `No pending request for ${requestId}` },
-        ],
-        isError: true,
-      };
-    },
-  );
+    );
 
-  // Tool: poll_pdf_commands (app-only) - Poll for pending commands
-  registerAppTool(
-    server,
-    "poll_pdf_commands",
-    {
-      title: "Poll PDF Commands",
-      description: "Poll for pending commands for a PDF viewer",
-      inputSchema: {
-        viewUUID: z.string().describe("The viewUUID of the PDF viewer"),
+    // Tool: poll_pdf_commands (app-only) - Poll for pending commands
+    registerAppTool(
+      server,
+      "poll_pdf_commands",
+      {
+        title: "Poll PDF Commands",
+        description: "Poll for pending commands for a PDF viewer",
+        inputSchema: {
+          viewUUID: z.string().describe("The viewUUID of the PDF viewer"),
+        },
+        _meta: { ui: { visibility: ["app"] } },
       },
-      _meta: { ui: { visibility: ["app"] } },
-    },
-    async ({ viewUUID: uuid }): Promise<CallToolResult> => {
-      // If commands are already queued, wait briefly to let more accumulate
-      if (commandQueues.has(uuid)) {
-        await new Promise((r) => setTimeout(r, POLL_BATCH_WAIT_MS));
-      } else {
-        // Long-poll: wait for commands to arrive or timeout
-        await new Promise<void>((resolve) => {
-          const timer = setTimeout(() => {
-            pollWaiters.delete(uuid);
-            resolve();
-          }, LONG_POLL_TIMEOUT_MS);
-          // Cancel any existing waiter for this uuid
-          const prev = pollWaiters.get(uuid);
-          if (prev) prev();
-          pollWaiters.set(uuid, () => {
-            clearTimeout(timer);
-            resolve();
-          });
-        });
-        // After waking, wait briefly for batching
+      async ({ viewUUID: uuid }): Promise<CallToolResult> => {
+        // If commands are already queued, wait briefly to let more accumulate
         if (commandQueues.has(uuid)) {
           await new Promise((r) => setTimeout(r, POLL_BATCH_WAIT_MS));
+        } else {
+          // Long-poll: wait for commands to arrive or timeout
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(() => {
+              pollWaiters.delete(uuid);
+              resolve();
+            }, LONG_POLL_TIMEOUT_MS);
+            // Cancel any existing waiter for this uuid
+            const prev = pollWaiters.get(uuid);
+            if (prev) prev();
+            pollWaiters.set(uuid, () => {
+              clearTimeout(timer);
+              resolve();
+            });
+          });
+          // After waking, wait briefly for batching
+          if (commandQueues.has(uuid)) {
+            await new Promise((r) => setTimeout(r, POLL_BATCH_WAIT_MS));
+          }
         }
-      }
-      const commands = dequeueCommands(uuid);
-      return {
-        content: [{ type: "text", text: `${commands.length} command(s)` }],
-        structuredContent: { commands },
-      };
-    },
-  );
+        const commands = dequeueCommands(uuid);
+        return {
+          content: [{ type: "text", text: `${commands.length} command(s)` }],
+          structuredContent: { commands },
+        };
+      },
+    );
+  } // end if (!disableInteract)
 
   // Tool: save_pdf (app-only) - Save annotated PDF back to local file
   registerAppTool(
