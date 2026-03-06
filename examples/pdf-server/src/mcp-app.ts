@@ -31,6 +31,7 @@ import {
   deserializeDiff,
   mergeAnnotations,
   computeDiff,
+  isDiffEmpty,
   buildAnnotatedPdfBytes,
   importPdfjsAnnotation,
   uint8ArrayToBase64,
@@ -3151,20 +3152,24 @@ async function loadBaselineAnnotations(
 }
 
 function persistAnnotations(): void {
-  if (!isRestoring) setDirty(true);
+  // Compute diff relative to PDF baseline
+  const currentAnnotations: PdfAnnotationDef[] = [];
+  for (const tracked of annotationMap.values()) {
+    currentAnnotations.push(tracked.def);
+  }
+  const diff = computeDiff(
+    pdfBaselineAnnotations,
+    currentAnnotations,
+    formFieldValues,
+  );
+
+  // Dirty tracks whether there are unsaved changes. Undoing back to baseline
+  // yields an empty diff → clean again → save button disables.
+  if (!isRestoring) setDirty(!isDiffEmpty(diff));
+
   const key = annotationStorageKey();
   if (!key) return;
   try {
-    // Compute diff relative to PDF baseline
-    const currentAnnotations: PdfAnnotationDef[] = [];
-    for (const tracked of annotationMap.values()) {
-      currentAnnotations.push(tracked.def);
-    }
-    const diff = computeDiff(
-      pdfBaselineAnnotations,
-      currentAnnotations,
-      formFieldValues,
-    );
     localStorage.setItem(key, serializeDiff(diff));
   } catch {
     // localStorage may be full or unavailable
