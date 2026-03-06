@@ -66,6 +66,8 @@ let pdfUrl = "";
 let pdfTitle: string | undefined;
 let viewUUID: string | undefined;
 let interactEnabled = false;
+/** Server-reported writability of the underlying file (fs.access W_OK). */
+let fileWritable = false;
 let currentRenderTask: { cancel: () => void } | null = null;
 
 // Annotation types imported from ./pdf-annotations.ts
@@ -669,7 +671,7 @@ function setDirty(dirty: boolean): void {
 }
 
 function updateSaveBtn(): void {
-  if (!isLocalFileUrl()) {
+  if (!fileWritable) {
     saveBtn.style.display = "none";
     return;
   }
@@ -2874,19 +2876,34 @@ function resetToBaseline(): void {
  * Remove everything, including annotations and form values that came from
  * the PDF file. Result: diff is non-empty (baseline items are "removed"),
  * dirty — saving writes a stripped PDF.
+ *
+ * Form fields: annotationStorage.remove() only drops our override, so the
+ * widget reverts to the PDF's stored /V. To actually CLEAR we must push
+ * each field's defaultValue (/DV) — which is what the PDF's own Reset
+ * button would do.
+ *
+ * Note: baseline annotations are still baked into the canvas appearance
+ * stream — we can only remove them from our overlay and the panel. Saving
+ * will omit them from the output (getAnnotatedPdfBytes skips baseline).
  */
 function clearAllItems(): void {
   clearAnnotationMap();
 
-  // Clear all form field values from storage — user AND baseline.
-  // Baseline values revert to the field's defaultValue.
-  if (pdfDocument) {
+  if (pdfDocument && cachedFieldObjects) {
+    const storage = pdfDocument.annotationStorage;
     for (const name of new Set([
       ...formFieldValues.keys(),
       ...pdfBaselineFormValues.keys(),
     ])) {
+      const fields = cachedFieldObjects[name];
       const ids = fieldNameToIds.get(name);
-      if (ids) for (const id of ids) pdfDocument.annotationStorage.remove(id);
+      if (!fields || !ids) continue;
+      for (let i = 0; i < ids.length; i++) {
+        const f = fields[i] ?? fields[0];
+        // Normalise defaultValue: null/undefined → "", "Off" for toggles stays
+        const dv = f?.defaultValue ?? "";
+        storage.setValue(ids[i], { value: dv });
+      }
     }
   }
   formFieldValues.clear();
@@ -3432,15 +3449,6 @@ async function getAnnotatedPdfBytes(): Promise<Uint8Array> {
     fullBytes as Uint8Array,
     annotations,
     formFieldValues,
-  );
-}
-
-/** Check if the current PDF URL is a local file that can be saved back. */
-function isLocalFileUrl(): boolean {
-  return (
-    pdfUrl.startsWith("file://") ||
-    pdfUrl.startsWith("computer://") ||
-    pdfUrl.startsWith("/")
   );
 }
 
@@ -4120,7 +4128,7 @@ document.addEventListener("keydown", (e) => {
   // Ctrl/Cmd+S: save (for local files)
   if ((e.ctrlKey || e.metaKey) && e.key === "s") {
     e.preventDefault();
-    if (isLocalFileUrl() && isDirty) {
+    if (fileWritable && isDirty) {
       savePdf();
     }
     return;
@@ -4634,6 +4642,7 @@ app.ontoolresult = async (result: CallToolResult) => {
   totalPages = parsed.pageCount || 1;
   viewUUID = result._meta?.viewUUID ? String(result._meta.viewUUID) : undefined;
   interactEnabled = result._meta?.interactEnabled === true;
+  fileWritable = result._meta?.writable === true;
 
   // Restore saved page or use initial page
   const savedPage = loadSavedPage();

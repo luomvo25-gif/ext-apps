@@ -1349,15 +1349,24 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
       const { totalBytes } = await readPdfRange(normalized, 0, 1);
       const uuid = randomUUID();
 
-      // Watch for external changes (stdio only — needs the poll channel)
-      if (
-        !disableInteract &&
-        (isFileUrl(normalized) || isLocalPath(normalized))
-      ) {
-        const watchPath = isFileUrl(normalized)
+      // Check writability for local files (governs save button visibility).
+      // False for read-only mounts, files without write permission, or
+      // Claude Desktop's uploads directory.
+      let writable = false;
+      if (isFileUrl(normalized) || isLocalPath(normalized)) {
+        const localPath = isFileUrl(normalized)
           ? fileUrlToPath(normalized)
           : decodeURIComponent(normalized);
-        startFileWatch(uuid, watchPath);
+        try {
+          await fs.promises.access(path.resolve(localPath), fs.constants.W_OK);
+          writable = true;
+        } catch {
+          // Not writable — leave false
+        }
+        // Watch for external changes (stdio only — needs the poll channel)
+        if (!disableInteract) {
+          startFileWatch(uuid, localPath);
+        }
       }
 
       // Extract form field schema (used for elicitation and field name validation)
@@ -1503,6 +1512,7 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
         _meta: {
           viewUUID: uuid,
           interactEnabled: !disableInteract,
+          writable,
         },
       };
     },
