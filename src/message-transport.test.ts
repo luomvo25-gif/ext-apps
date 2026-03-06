@@ -352,7 +352,7 @@ describe("PostMessageTransport", () => {
       const transport = await createStartedTransport();
       // onclose deliberately left unset
 
-      await expect(transport.close()).resolves.toBeUndefined();
+      expect(transport.close()).resolves.toBeUndefined();
     });
 
     it("two transports listen independently", async () => {
@@ -363,11 +363,11 @@ describe("PostMessageTransport", () => {
 
       const transportA = new PostMessageTransport(
         eventTarget as unknown as Window,
-        sourceA as MessageEventSource,
+        sourceA as unknown as MessageEventSource,
       );
       const transportB = new PostMessageTransport(
         eventTarget as unknown as Window,
-        sourceB as MessageEventSource,
+        sourceB as unknown as MessageEventSource,
       );
       await transportA.start();
       await transportB.start();
