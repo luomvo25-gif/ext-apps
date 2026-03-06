@@ -119,6 +119,10 @@ const redoStack: EditEntry[] = [];
 
 // PDF.js form field name → annotation IDs mapping (for annotationStorage)
 const fieldNameToIds = new Map<string, string[]>();
+// Radio widget annotation ID → its export value (buttonValue). pdf.js
+// creates <input type=radio> without setting .value, so target.value
+// defaults to "on"; this map lets the input listener report the real value.
+const radioButtonValues = new Map<string, string>();
 // PDF.js form field name → page number mapping
 const fieldNameToPage = new Map<string, number>();
 // PDF.js form field name → human-readable label (from PDF TU / alternativeText)
@@ -3418,6 +3422,7 @@ async function buildFieldNameMap(
   doc: pdfjsLib.PDFDocumentProxy,
 ): Promise<void> {
   fieldNameToIds.clear();
+  radioButtonValues.clear();
   fieldNameToPage.clear();
   fieldNameToLabel.clear();
   fieldNameToOrder.clear();
@@ -3456,6 +3461,14 @@ async function buildFieldNameMap(
       const ids = fieldNameToIds.get(a.fieldName) ?? [];
       ids.push(a.id);
       fieldNameToIds.set(a.fieldName, ids);
+
+      // Radio buttons: pdf.js creates <input type=radio> WITHOUT setting
+      // .value, so reading target.value gives the HTML default "on".
+      // Remember each widget's export value so the input listener can
+      // report it instead.
+      if (a.radioButton && a.buttonValue != null) {
+        radioButtonValues.set(a.id, String(a.buttonValue));
+      }
 
       if (!fieldNameToPage.has(a.fieldName)) {
         fieldNameToPage.set(a.fieldName, pageNum);
@@ -4055,10 +4068,19 @@ formLayerEl.addEventListener("input", (e) => {
   const target = e.target as HTMLInputElement | HTMLSelectElement;
   const fieldName = target.name;
   if (!fieldName) return;
-  const value =
-    target instanceof HTMLInputElement && target.type === "checkbox"
-      ? target.checked
-      : target.value;
+  let value: string | boolean;
+  if (target instanceof HTMLInputElement && target.type === "checkbox") {
+    value = target.checked;
+  } else if (target instanceof HTMLInputElement && target.type === "radio") {
+    // pdf.js doesn't set .value on radio inputs → target.value defaults to
+    // "on". Use the widget's export value (buttonValue) so the panel and
+    // baseline agree on the same representation.
+    if (!target.checked) return; // unchecking siblings — ignore
+    const wid = target.getAttribute("data-element-id");
+    value = (wid && radioButtonValues.get(wid)) ?? target.value;
+  } else {
+    value = target.value;
+  }
   formFieldValues.set(fieldName, value);
   updateAnnotationsBadge();
   renderAnnotationPanel();
@@ -4585,6 +4607,7 @@ async function reloadPdf(): Promise<void> {
   currentMatchIndex = -1;
   focusedFieldName = null;
   fieldNameToIds.clear();
+  radioButtonValues.clear();
   fieldNameToLabel.clear();
   fieldNameToOrder.clear();
   cachedFieldObjects = null;
