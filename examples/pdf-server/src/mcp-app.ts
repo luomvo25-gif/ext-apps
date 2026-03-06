@@ -4161,16 +4161,10 @@ async function fetchRange(
  * Load PDF progressively using PDFDataRangeTransport.
  * PDF.js will request ranges as needed to render pages.
  */
-async function loadPdfProgressively(
-  urlToLoad: string,
-  fileSizeBytes: number,
-): Promise<{
+async function loadPdfProgressively(urlToLoad: string): Promise<{
   document: pdfjsLib.PDFDocumentProxy;
   totalBytes: number;
 }> {
-  const fileTotalBytes = fileSizeBytes;
-  log.info(`PDF file size: ${(fileTotalBytes / 1024) | 0} KB`);
-
   class AppRangeTransport extends pdfjsLib.PDFDataRangeTransport {
     requestDataRange(begin: number, end: number) {
       fetchRange(urlToLoad, begin, end)
@@ -4183,14 +4177,16 @@ async function loadPdfProgressively(
     }
   }
 
+  // Probe current file size via a live read_pdf_bytes call. Don't trust the
+  // totalBytes from the display_pdf result: that's baked into conversation
+  // history, so if the user saved the PDF (annotations/form fields) and
+  // reloaded the conversation, the host replays a stale value. A mismatch
+  // makes pdf.js fail every chunk with an opaque "Bad end offset: N".
+  const { totalBytes: fileTotalBytes } = await fetchChunk(urlToLoad, 0, 1);
   if (!Number.isInteger(fileTotalBytes) || fileTotalBytes <= 0) {
-    // If this is missing, PDFDataRangeTransport.length is NaN → worker's
-    // ChunkedStream is sized 0 → every chunk fails with "Bad end offset: N".
-    throw new Error(
-      `Invalid totalBytes (${fileTotalBytes}) from display_pdf result — ` +
-        `server/viewer bundle mismatch? Rebuild with 'npm run build'.`,
-    );
+    throw new Error(`Invalid totalBytes (${fileTotalBytes}) from server`);
   }
+  log.info(`PDF file size: ${(fileTotalBytes / 1024) | 0} KB`);
 
   // Create transport with total file size, no initial data — PDF.js will request what it needs
   const transport = new AppRangeTransport(fileTotalBytes, null);
@@ -4320,10 +4316,7 @@ app.ontoolresult = async (result: CallToolResult) => {
 
   try {
     // Use progressive loading - document available as soon as initial data arrives
-    const { document, totalBytes } = await loadPdfProgressively(
-      pdfUrl,
-      parsed.totalBytes,
-    );
+    const { document, totalBytes } = await loadPdfProgressively(pdfUrl);
     pdfDocument = document;
     totalPages = document.numPages;
 
