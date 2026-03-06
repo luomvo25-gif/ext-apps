@@ -1,5 +1,7 @@
 ---
 title: Overview
+group: Getting Started
+description: MCP Apps extends the Model Context Protocol to let MCP servers deliver interactive UIs — charts, forms, dashboards — rendered securely in iframes inside any compliant host.
 ---
 
 # MCP Apps Overview

@@ -443,19 +443,49 @@ async function refreshRoots(server: Server): Promise<void> {
 // MCP Server Factory
 // =============================================================================
 
-export function createServer(): McpServer {
+export interface CreateServerOptions {
+  /**
+   * Whether to honour MCP roots sent by the client.
+   *
+   * When a server is exposed over HTTP, the connecting client is
+   * typically remote and may advertise `roots` that refer to
+   * directories on the **client's** file system.  Because the server
+   * resolves those paths locally, accepting them by default would give
+   * the remote client access to arbitrary directories on the
+   * **server's** machine.
+   *
+   * For stdio the client is typically local (e.g. Claude Desktop on the
+   * same machine), so roots are safe and enabled by default.
+   *
+   * Set this to `true` for HTTP only when you trust the client, or
+   * pass the `--use-client-roots` CLI flag.
+   *
+   * @default false
+   */
+  useClientRoots?: boolean;
+}
+
+export function createServer(options: CreateServerOptions = {}): McpServer {
+  const { useClientRoots = false } = options;
   const server = new McpServer({ name: "PDF Server", version: "2.0.0" });
 
-  // Fetch roots on initialization and subscribe to changes
-  server.server.oninitialized = () => {
-    refreshRoots(server.server);
-  };
-  server.server.setNotificationHandler(
-    RootsListChangedNotificationSchema,
-    async () => {
-      await refreshRoots(server.server);
-    },
-  );
+  if (useClientRoots) {
+    // Fetch roots on initialization and subscribe to changes
+    server.server.oninitialized = () => {
+      refreshRoots(server.server);
+    };
+    server.server.setNotificationHandler(
+      RootsListChangedNotificationSchema,
+      async () => {
+        await refreshRoots(server.server);
+      },
+    );
+  } else {
+    console.error(
+      "[pdf-server] Client roots are ignored (default for remote transports). " +
+        "Pass --use-client-roots to allow the client to expose local directories.",
+    );
+  }
 
   // Create session-local cache (isolated per server instance)
   const { readPdfRange } = createPdfCache();

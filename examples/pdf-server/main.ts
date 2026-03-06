@@ -89,14 +89,21 @@ export async function startStdioServer(
   await createServer().connect(new StdioServerTransport());
 }
 
-function parseArgs(): { urls: string[]; stdio: boolean } {
+function parseArgs(): {
+  urls: string[];
+  stdio: boolean;
+  useClientRoots: boolean;
+} {
   const args = process.argv.slice(2);
   const urls: string[] = [];
   let stdio = false;
+  let useClientRoots = false;
 
   for (const arg of args) {
     if (arg === "--stdio") {
       stdio = true;
+    } else if (arg === "--use-client-roots") {
+      useClientRoots = true;
     } else if (!arg.startsWith("-")) {
       // Convert local paths to file:// URLs, normalize arxiv URLs
       let url = arg;
@@ -113,11 +120,15 @@ function parseArgs(): { urls: string[]; stdio: boolean } {
     }
   }
 
-  return { urls: urls.length > 0 ? urls : [DEFAULT_PDF], stdio };
+  return {
+    urls: urls.length > 0 ? urls : [DEFAULT_PDF],
+    stdio,
+    useClientRoots,
+  };
 }
 
 async function main() {
-  const { urls, stdio } = parseArgs();
+  const { urls, stdio, useClientRoots } = parseArgs();
 
   // Register local files in whitelist
   for (const url of urls) {
@@ -141,9 +152,11 @@ async function main() {
   console.error(`[pdf-server] Ready (${urls.length} URL(s) configured)`);
 
   if (stdio) {
-    await startStdioServer(createServer);
+    // stdio → client is local (e.g. Claude Desktop), roots are safe
+    await startStdioServer(() => createServer({ useClientRoots: true }));
   } else {
-    await startStreamableHTTPServer(createServer);
+    // HTTP → client is remote, only honour roots with explicit opt-in
+    await startStreamableHTTPServer(() => createServer({ useClientRoots }));
   }
 }
 

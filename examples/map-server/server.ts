@@ -18,7 +18,6 @@ import {
   registerAppTool,
   registerAppResource,
   RESOURCE_MIME_TYPE,
-  RESOURCE_URI_META_KEY,
 } from "@modelcontextprotocol/ext-apps/server";
 import { randomUUID } from "crypto";
 
@@ -26,7 +25,7 @@ import { randomUUID } from "crypto";
 const DIST_DIR = import.meta.filename.endsWith(".ts")
   ? path.join(import.meta.dirname, "dist")
   : import.meta.dirname;
-const RESOURCE_URI = "ui://cesium-map/mcp-app.html";
+const resourceUri = "ui://cesium-map/mcp-app.html";
 
 // =============================================================================
 // Annotation Schemas (discriminated union → oneOf in JSON Schema)
@@ -330,8 +329,8 @@ export function createServer(options?: CreateServerOptions): McpServer {
   // Register the CesiumJS map resource with CSP for external tile sources
   registerAppResource(
     server,
-    RESOURCE_URI,
-    RESOURCE_URI,
+    resourceUri,
+    resourceUri,
     { mimeType: RESOURCE_MIME_TYPE },
     async (): Promise<ReadResourceResult> => {
       const html = await fs.readFile(
@@ -342,7 +341,7 @@ export function createServer(options?: CreateServerOptions): McpServer {
         contents: [
           // CSP metadata on the content item takes precedence over listing-level _meta
           {
-            uri: RESOURCE_URI,
+            uri: resourceUri,
             mimeType: RESOURCE_MIME_TYPE,
             text: html,
             _meta: cspMeta,
@@ -448,7 +447,7 @@ export function createServer(options?: CreateServerOptions): McpServer {
             "Initial annotations: markers, routes, areas, or circles to display on the map",
           ),
       },
-      _meta: { [RESOURCE_URI_META_KEY]: RESOURCE_URI },
+      _meta: { ui: { resourceUri } },
     },
     async ({
       west,
