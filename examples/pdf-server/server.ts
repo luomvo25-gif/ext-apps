@@ -1001,11 +1001,6 @@ export function createServer(options: CreateServerOptions = {}): McpServer {
         await refreshRoots(server.server);
       },
     );
-  } else {
-    console.error(
-      "[pdf-server] Client roots are ignored (default for remote transports). " +
-        "Pass --use-client-roots to allow the client to expose local directories.",
-    );
   }
 
   // Create session-local cache (isolated per server instance)

@@ -158,6 +158,12 @@ async function main() {
     );
   } else {
     // HTTP → client is remote, only honour roots with explicit opt-in
+    if (!useClientRoots) {
+      console.error(
+        "[pdf-server] Client roots are ignored (default for remote transports). " +
+          "Pass --use-client-roots to allow the client to expose local directories.",
+      );
+    }
     await startStreamableHTTPServer(() => createServer({ useClientRoots }));
   }
 }
