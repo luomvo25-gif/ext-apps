@@ -1,0 +1,595 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>Migrate OpenAI App | MCP Apps</title><meta name="description" content="Migrate from the OpenAI Apps SDK to MCP Apps SDK with concept mapping tables, API equivalents, and complete before/after code examples."/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script><link rel="stylesheet" href="../assets/typedoc-github-style.css"/><link rel="icon" href="../favicons/favicon-32x32.png" type="image/png" sizes="32x32" media="(prefers-color-scheme: light)"/>
+<link rel="icon" href="../favicons/favicon-16x16.png" type="image/png" sizes="16x16" media="(prefers-color-scheme: light)"/>
+<link rel="shortcut icon" href="../favicons/favicon.ico" type="image/x-icon" media="(prefers-color-scheme: light)"/>
+<link rel="icon" href="../favicons/favicon-dark-32x32.png" type="image/png" sizes="32x32" media="(prefers-color-scheme: dark)"/>
+<link rel="icon" href="../favicons/favicon-dark-16x16.png" type="image/png" sizes="16x16" media="(prefers-color-scheme: dark)"/>
+<link rel="shortcut icon" href="../favicons/favicon-dark.ico" type="image/x-icon" media="(prefers-color-scheme: dark)"/>
+<link rel="apple-touch-icon" href="../favicons/apple-touch-icon.png" type="image/png" sizes="180x180"/>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"TechArticle","name":"Migrate OpenAI App | MCP Apps","headline":"Migrate OpenAI App | MCP Apps","description":"Migrate from the OpenAI Apps SDK to MCP Apps SDK with concept mapping tables, API equivalents, and complete before/after code examples.","url":"https://apps.extensions.modelcontextprotocol.io/api/documents/migrate-openai-app.html","isPartOf":{"@type":"WebSite","name":"MCP Apps","url":"https://apps.extensions.modelcontextprotocol.io/"}}</script>
+<link rel="stylesheet" href="../assets/custom.css"/>
+</head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar"><div class="tsd-toolbar-contents container"><a href="../index.html" class="title">MCP Apps</a><div id="tsd-toolbar-links"><a href="https://github.com/modelcontextprotocol/ext-apps">GitHub</a><a href="https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx">Specification</a></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/><ul role="listbox" id="tsd-search-results"></ul><div id="tsd-search-status" aria-live="polite" aria-atomic="true"><div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header><div class="container container-main"><div class="col-content"><div class="tsd-page-title"><ul class="tsd-breadcrumb" aria-label="Breadcrumb"><li><span>Getting Started</span></li></ul></div><div class="tsd-panel tsd-typography"><h1 id="migrating-from-openai-apps-sdk-to-mcp-apps-sdk" class="tsd-anchor-link">Migrating from OpenAI Apps SDK to MCP Apps SDK<a href="#migrating-from-openai-apps-sdk-to-mcp-apps-sdk" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<p>This reference maps OpenAI Apps SDK concepts to their MCP Apps SDK (<code>@modelcontextprotocol/ext-apps</code>) equivalents. Use the tables below for quick lookup during migration, and refer to the code examples for complete before/after comparisons.</p>
+<p>This guide covers server-side changes first (metadata, tools, resources), then client-side changes (setup, context, events).</p>
+<div class="tsd-alert tsd-alert-note"><div class="tsd-alert-title"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><use href="../assets/icons.svg#icon-alertNote"></use></svg><span>Note</span></div><p>
+Some OpenAI Apps SDK features don't have MCP equivalents yet. These are marked &quot;Not yet implemented&quot; in the tables below.</p>
+</div>
+<h2 id="server-side" class="tsd-anchor-link">Server-Side<a href="#server-side" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>The server-side changes involve updating metadata structure and using helper functions.</p>
+<h3 id="quick-start-comparison" class="tsd-anchor-link">Quick Start Comparison<a href="#quick-start-comparison" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI Apps SDK</th>
+<th>MCP Apps SDK</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Flat metadata keys (<code>_meta[&quot;openai/...&quot;]</code>)</td>
+<td>Nested metadata structure (<code>_meta.ui.*</code>)</td>
+</tr>
+<tr>
+<td>Direct <code>server.registerTool()</code>/<code>server.registerResource()</code></td>
+<td>Helper functions: <code>registerAppTool()</code>, <code>registerAppResource()</code></td>
+</tr>
+<tr>
+<td>UI Resource MIME type: <code>text/html+skybridge</code></td>
+<td>UI Resource MIME type: <code>text/html;profile=mcp-app</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="tool-metadata" class="tsd-anchor-link">Tool Metadata<a href="#tool-metadata" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>_meta[&quot;openai/outputTemplate&quot;]</code></td>
+<td><code>_meta.ui.resourceUri</code></td>
+<td>URI of UI resource</td>
+</tr>
+<tr>
+<td><code>_meta[&quot;openai/toolInvocation/invoking&quot;]</code></td>
+<td>—</td>
+<td>Not yet implemented</td>
+</tr>
+<tr>
+<td><code>_meta[&quot;openai/toolInvocation/invoked&quot;]</code></td>
+<td>—</td>
+<td>Not yet implemented</td>
+</tr>
+<tr>
+<td><code>_meta[&quot;openai/widgetAccessible&quot;]</code> (<code>boolean</code>)</td>
+<td><code>_meta.ui.visibility</code> (<code>string[]</code>)</td>
+<td><code>true</code>/<code>false</code> → include/exclude <code>&quot;app&quot;</code> in array</td>
+</tr>
+<tr>
+<td><code>_meta[&quot;openai/visibility&quot;]</code> (<code>string</code>)</td>
+<td><code>_meta.ui.visibility</code> (<code>string[]</code>)</td>
+<td><code>&quot;public&quot;</code>/<code>&quot;private&quot;</code> → include/exclude <code>&quot;model&quot;</code> in array</td>
+</tr>
+</tbody>
+</table>
+<h3 id="resource-metadata" class="tsd-anchor-link">Resource Metadata<a href="#resource-metadata" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>_meta[&quot;openai/widgetCSP&quot;]</code></td>
+<td><code>_meta.ui.csp</code></td>
+<td>See <a href="#csp-field-mapping">CSP field mapping</a> below</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>_meta.ui.permissions</code></td>
+<td>MCP adds: permissions for camera, microphone, geolocation, clipboard</td>
+</tr>
+<tr>
+<td><code>_meta[&quot;openai/widgetDomain&quot;]</code></td>
+<td><code>_meta.ui.domain</code></td>
+<td>Dedicated sandbox origin</td>
+</tr>
+<tr>
+<td><code>_meta[&quot;openai/widgetPrefersBorder&quot;]</code></td>
+<td><code>_meta.ui.prefersBorder</code></td>
+<td>Visual boundary preference</td>
+</tr>
+<tr>
+<td><code>_meta[&quot;openai/widgetDescription&quot;]</code></td>
+<td>—</td>
+<td>Not yet implemented; use <code>app.updateModelContext()</code> for dynamic context</td>
+</tr>
+</tbody>
+</table>
+<h3 id="resource-mime-type" class="tsd-anchor-link">Resource MIME Type<a href="#resource-mime-type" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>text/html+skybridge</code></td>
+<td><code>text/html;profile=mcp-app</code></td>
+<td>Auto-set by <code>registerAppResource()</code>; use <code>RESOURCE_MIME_TYPE</code> constant if manual</td>
+</tr>
+</tbody>
+</table>
+<h3 id="csp-field-mapping" class="tsd-anchor-link">CSP Field Mapping<a href="#csp-field-mapping" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>resource_domains</code></td>
+<td><code>resourceDomains</code></td>
+<td>Origins for static assets (images, fonts, styles, scripts)</td>
+</tr>
+<tr>
+<td><code>connect_domains</code></td>
+<td><code>connectDomains</code></td>
+<td>Origins for fetch/XHR/WebSocket requests</td>
+</tr>
+<tr>
+<td><code>frame_domains</code></td>
+<td><code>frameDomains</code></td>
+<td>Origins for nested iframes</td>
+</tr>
+<tr>
+<td><code>redirect_domains</code></td>
+<td>—</td>
+<td>OpenAI-only: origins for <code>openExternal</code> redirects</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>baseUriDomains</code></td>
+<td>MCP-only: <code>base-uri</code> CSP directive</td>
+</tr>
+</tbody>
+</table>
+<h3 id="server-side-migration-example" class="tsd-anchor-link">Server-Side Migration Example<a href="#server-side-migration-example" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<h4 id="before-openai" class="tsd-anchor-link">Before (OpenAI)<a href="#before-openai" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4>
+<pre><code class="typescript"><span class="hl-9">import</span><span class="hl-0"> { </span><span class="hl-1">McpServer</span><span class="hl-0"> } </span><span class="hl-9">from</span><span class="hl-0"> </span><span class="hl-3">&quot;@modelcontextprotocol/sdk/server/mcp.js&quot;</span><span class="hl-0">;</span><br/><span class="hl-9">import</span><span class="hl-0"> { </span><span class="hl-1">z</span><span class="hl-0"> } </span><span class="hl-9">from</span><span class="hl-0"> </span><span class="hl-3">&quot;zod&quot;</span><span class="hl-0">;</span><br/><br/><span class="hl-4">function</span><span class="hl-0"> </span><span class="hl-2">createServer</span><span class="hl-0">() {</span><br/><span class="hl-0">  </span><span class="hl-4">const</span><span class="hl-0"> </span><span class="hl-10">server</span><span class="hl-0"> = </span><span class="hl-4">new</span><span class="hl-0"> </span><span class="hl-2">McpServer</span><span class="hl-0">({ </span><span class="hl-1">name:</span><span class="hl-0"> </span><span class="hl-3">&quot;shop&quot;</span><span class="hl-0">, </span><span class="hl-1">version:</span><span class="hl-0"> </span><span class="hl-3">&quot;1.0.0&quot;</span><span class="hl-0"> });</span><br/><br/><span class="hl-0">  </span><span class="hl-13">// Register tool with OpenAI metadata</span><br/><span class="hl-0">  </span><span class="hl-1">server</span><span class="hl-0">.</span><span class="hl-2">registerTool</span><span class="hl-0">(</span><br/><span class="hl-0">    </span><span class="hl-3">&quot;shopping-cart&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">    {</span><br/><span class="hl-0">      </span><span class="hl-1">title:</span><span class="hl-0"> </span><span class="hl-3">&quot;Shopping Cart&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">      </span><span class="hl-1">description:</span><span class="hl-0"> </span><span class="hl-3">&quot;Display the user&#39;s shopping cart&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">      </span><span class="hl-1">inputSchema:</span><span class="hl-0"> { </span><span class="hl-1">userId:</span><span class="hl-0"> </span><span class="hl-1">z</span><span class="hl-0">.</span><span class="hl-2">string</span><span class="hl-0">() },</span><br/><span class="hl-0">      </span><span class="hl-1">annotations:</span><span class="hl-0"> { </span><span class="hl-1">readOnlyHint:</span><span class="hl-0"> </span><span class="hl-4">true</span><span class="hl-0"> },</span><br/><span class="hl-0">      </span><span class="hl-1">_meta:</span><span class="hl-0"> {</span><br/><span class="hl-0">        </span><span class="hl-3">&quot;openai/outputTemplate&quot;</span><span class="hl-1">:</span><span class="hl-0"> </span><span class="hl-3">&quot;ui://view/cart.html&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">        </span><span class="hl-3">&quot;openai/toolInvocation/invoking&quot;</span><span class="hl-1">:</span><span class="hl-0"> </span><span class="hl-3">&quot;Loading cart...&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">        </span><span class="hl-3">&quot;openai/toolInvocation/invoked&quot;</span><span class="hl-1">:</span><span class="hl-0"> </span><span class="hl-3">&quot;Cart ready&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">        </span><span class="hl-3">&quot;openai/widgetAccessible&quot;</span><span class="hl-1">:</span><span class="hl-0"> </span><span class="hl-4">true</span><span class="hl-0">,</span><br/><span class="hl-0">      },</span><br/><span class="hl-0">    },</span><br/><span class="hl-0">    </span><span class="hl-4">async</span><span class="hl-0"> (</span><span class="hl-1">args</span><span class="hl-0">) </span><span class="hl-4">=&gt;</span><span class="hl-0"> {</span><br/><span class="hl-0">      </span><span class="hl-4">const</span><span class="hl-0"> </span><span class="hl-10">cart</span><span class="hl-0"> = </span><span class="hl-9">await</span><span class="hl-0"> </span><span class="hl-2">getCart</span><span class="hl-0">(</span><span class="hl-1">args</span><span class="hl-0">.</span><span class="hl-1">userId</span><span class="hl-0">);</span><br/><span class="hl-0">      </span><span class="hl-9">return</span><span class="hl-0"> {</span><br/><span class="hl-0">        </span><span class="hl-1">content:</span><span class="hl-0"> [{ </span><span class="hl-1">type:</span><span class="hl-0"> </span><span class="hl-3">&quot;text&quot;</span><span class="hl-0">, </span><span class="hl-1">text:</span><span class="hl-0"> </span><span class="hl-10">JSON</span><span class="hl-0">.</span><span class="hl-2">stringify</span><span class="hl-0">(</span><span class="hl-1">cart</span><span class="hl-0">) }],</span><br/><span class="hl-0">        </span><span class="hl-1">structuredContent:</span><span class="hl-0"> { </span><span class="hl-1">cart</span><span class="hl-0"> },</span><br/><span class="hl-0">      };</span><br/><span class="hl-0">    },</span><br/><span class="hl-0">  );</span><br/><br/><span class="hl-0">  </span><span class="hl-13">// Register UI resource</span><br/><span class="hl-0">  </span><span class="hl-1">server</span><span class="hl-0">.</span><span class="hl-2">registerResource</span><span class="hl-0">(</span><br/><span class="hl-0">    </span><span class="hl-3">&quot;Cart View&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">    </span><span class="hl-3">&quot;ui://view/cart.html&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">    { </span><span class="hl-1">mimeType:</span><span class="hl-0"> </span><span class="hl-3">&quot;text/html+skybridge&quot;</span><span class="hl-0"> },</span><br/><span class="hl-0">    </span><span class="hl-4">async</span><span class="hl-0"> () </span><span class="hl-4">=&gt;</span><span class="hl-0"> ({</span><br/><span class="hl-0">      </span><span class="hl-1">contents:</span><span class="hl-0"> [</span><br/><span class="hl-0">        {</span><br/><span class="hl-0">          </span><span class="hl-1">uri:</span><span class="hl-0"> </span><span class="hl-3">&quot;ui://view/cart.html&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">          </span><span class="hl-1">mimeType:</span><span class="hl-0"> </span><span class="hl-3">&quot;text/html+skybridge&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">          </span><span class="hl-1">text:</span><span class="hl-0"> </span><span class="hl-2">getCartHtml</span><span class="hl-0">(),</span><br/><span class="hl-0">          </span><span class="hl-1">_meta:</span><span class="hl-0"> {</span><br/><span class="hl-0">            </span><span class="hl-3">&quot;openai/widgetCSP&quot;</span><span class="hl-1">:</span><span class="hl-0"> {</span><br/><span class="hl-0">              </span><span class="hl-1">resource_domains:</span><span class="hl-0"> [</span><span class="hl-3">&quot;https://cdn.example.com&quot;</span><span class="hl-0">],</span><br/><span class="hl-0">              </span><span class="hl-1">connect_domains:</span><span class="hl-0"> [</span><span class="hl-3">&quot;https://api.example.com&quot;</span><span class="hl-0">],</span><br/><span class="hl-0">              </span><span class="hl-1">frame_domains:</span><span class="hl-0"> [</span><span class="hl-3">&quot;https://embed.example.com&quot;</span><span class="hl-0">],</span><br/><span class="hl-0">            },</span><br/><span class="hl-0">          },</span><br/><span class="hl-0">        },</span><br/><span class="hl-0">      ],</span><br/><span class="hl-0">    }),</span><br/><span class="hl-0">  );</span><br/><br/><span class="hl-0">  </span><span class="hl-9">return</span><span class="hl-0"> </span><span class="hl-1">server</span><span class="hl-0">;</span><br/><span class="hl-0">}</span>
+</code><button type="button">Copy</button></pre>
+
+<h4 id="after-mcp-apps" class="tsd-anchor-link">After (MCP Apps)<a href="#after-mcp-apps" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4>
+<pre><code class="typescript"><span class="hl-9">import</span><span class="hl-0"> { </span><span class="hl-1">McpServer</span><span class="hl-0"> } </span><span class="hl-9">from</span><span class="hl-0"> </span><span class="hl-3">&quot;@modelcontextprotocol/sdk/server/mcp.js&quot;</span><span class="hl-0">;</span><br/><span class="hl-9">import</span><span class="hl-0"> {</span><br/><span class="hl-0">  </span><span class="hl-1">registerAppTool</span><span class="hl-0">,</span><br/><span class="hl-0">  </span><span class="hl-1">registerAppResource</span><span class="hl-0">,</span><br/><span class="hl-0">  </span><span class="hl-1">RESOURCE_MIME_TYPE</span><span class="hl-0">,</span><br/><span class="hl-0">} </span><span class="hl-9">from</span><span class="hl-0"> </span><span class="hl-3">&quot;@modelcontextprotocol/ext-apps/server&quot;</span><span class="hl-0">;</span><br/><span class="hl-9">import</span><span class="hl-0"> { </span><span class="hl-1">z</span><span class="hl-0"> } </span><span class="hl-9">from</span><span class="hl-0"> </span><span class="hl-3">&quot;zod&quot;</span><span class="hl-0">;</span><br/><br/><span class="hl-4">function</span><span class="hl-0"> </span><span class="hl-2">createServer</span><span class="hl-0">() {</span><br/><span class="hl-0">  </span><span class="hl-4">const</span><span class="hl-0"> </span><span class="hl-10">server</span><span class="hl-0"> = </span><span class="hl-4">new</span><span class="hl-0"> </span><span class="hl-2">McpServer</span><span class="hl-0">({ </span><span class="hl-1">name:</span><span class="hl-0"> </span><span class="hl-3">&quot;shop&quot;</span><span class="hl-0">, </span><span class="hl-1">version:</span><span class="hl-0"> </span><span class="hl-3">&quot;1.0.0&quot;</span><span class="hl-0"> });</span><br/><br/><span class="hl-0">  </span><span class="hl-13">// Register tool with MCP Apps metadata</span><br/><span class="hl-0">  </span><span class="hl-2">registerAppTool</span><span class="hl-0">(</span><br/><span class="hl-0">    </span><span class="hl-1">server</span><span class="hl-0">,</span><br/><span class="hl-0">    </span><span class="hl-3">&quot;shopping-cart&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">    {</span><br/><span class="hl-0">      </span><span class="hl-1">title:</span><span class="hl-0"> </span><span class="hl-3">&quot;Shopping Cart&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">      </span><span class="hl-1">description:</span><span class="hl-0"> </span><span class="hl-3">&quot;Display the user&#39;s shopping cart&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">      </span><span class="hl-1">inputSchema:</span><span class="hl-0"> { </span><span class="hl-1">userId:</span><span class="hl-0"> </span><span class="hl-1">z</span><span class="hl-0">.</span><span class="hl-2">string</span><span class="hl-0">() },</span><br/><span class="hl-0">      </span><span class="hl-1">annotations:</span><span class="hl-0"> { </span><span class="hl-1">readOnlyHint:</span><span class="hl-0"> </span><span class="hl-4">true</span><span class="hl-0"> },</span><br/><span class="hl-0">      </span><span class="hl-1">_meta:</span><span class="hl-0"> { </span><span class="hl-1">ui:</span><span class="hl-0"> { </span><span class="hl-1">resourceUri:</span><span class="hl-0"> </span><span class="hl-3">&quot;ui://view/cart.html&quot;</span><span class="hl-0"> } },</span><br/><span class="hl-0">    },</span><br/><span class="hl-0">    </span><span class="hl-4">async</span><span class="hl-0"> (</span><span class="hl-1">args</span><span class="hl-0">) </span><span class="hl-4">=&gt;</span><span class="hl-0"> {</span><br/><span class="hl-0">      </span><span class="hl-4">const</span><span class="hl-0"> </span><span class="hl-10">cart</span><span class="hl-0"> = </span><span class="hl-9">await</span><span class="hl-0"> </span><span class="hl-2">getCart</span><span class="hl-0">(</span><span class="hl-1">args</span><span class="hl-0">.</span><span class="hl-1">userId</span><span class="hl-0">);</span><br/><span class="hl-0">      </span><span class="hl-9">return</span><span class="hl-0"> {</span><br/><span class="hl-0">        </span><span class="hl-1">content:</span><span class="hl-0"> [{ </span><span class="hl-1">type:</span><span class="hl-0"> </span><span class="hl-3">&quot;text&quot;</span><span class="hl-0">, </span><span class="hl-1">text:</span><span class="hl-0"> </span><span class="hl-10">JSON</span><span class="hl-0">.</span><span class="hl-2">stringify</span><span class="hl-0">(</span><span class="hl-1">cart</span><span class="hl-0">) }],</span><br/><span class="hl-0">        </span><span class="hl-1">structuredContent:</span><span class="hl-0"> { </span><span class="hl-1">cart</span><span class="hl-0"> },</span><br/><span class="hl-0">      };</span><br/><span class="hl-0">    },</span><br/><span class="hl-0">  );</span><br/><br/><span class="hl-0">  </span><span class="hl-13">// Register UI resource</span><br/><span class="hl-0">  </span><span class="hl-2">registerAppResource</span><span class="hl-0">(</span><br/><span class="hl-0">    </span><span class="hl-1">server</span><span class="hl-0">,</span><br/><span class="hl-0">    </span><span class="hl-3">&quot;Cart View&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">    </span><span class="hl-3">&quot;ui://view/cart.html&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">    { </span><span class="hl-1">description:</span><span class="hl-0"> </span><span class="hl-3">&quot;Shopping cart UI&quot;</span><span class="hl-0"> },</span><br/><span class="hl-0">    </span><span class="hl-4">async</span><span class="hl-0"> () </span><span class="hl-4">=&gt;</span><span class="hl-0"> ({</span><br/><span class="hl-0">      </span><span class="hl-1">contents:</span><span class="hl-0"> [</span><br/><span class="hl-0">        {</span><br/><span class="hl-0">          </span><span class="hl-1">uri:</span><span class="hl-0"> </span><span class="hl-3">&quot;ui://view/cart.html&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">          </span><span class="hl-1">mimeType:</span><span class="hl-0"> </span><span class="hl-10">RESOURCE_MIME_TYPE</span><span class="hl-0">,</span><br/><span class="hl-0">          </span><span class="hl-1">text:</span><span class="hl-0"> </span><span class="hl-2">getCartHtml</span><span class="hl-0">(),</span><br/><span class="hl-0">          </span><span class="hl-1">_meta:</span><span class="hl-0"> {</span><br/><span class="hl-0">            </span><span class="hl-1">ui:</span><span class="hl-0"> {</span><br/><span class="hl-0">              </span><span class="hl-1">csp:</span><span class="hl-0"> {</span><br/><span class="hl-0">                </span><span class="hl-1">resourceDomains:</span><span class="hl-0"> [</span><span class="hl-3">&quot;https://cdn.example.com&quot;</span><span class="hl-0">],</span><br/><span class="hl-0">                </span><span class="hl-1">connectDomains:</span><span class="hl-0"> [</span><span class="hl-3">&quot;https://api.example.com&quot;</span><span class="hl-0">],</span><br/><span class="hl-0">                </span><span class="hl-1">frameDomains:</span><span class="hl-0"> [</span><span class="hl-3">&quot;https://embed.example.com&quot;</span><span class="hl-0">],</span><br/><span class="hl-0">              },</span><br/><span class="hl-0">            },</span><br/><span class="hl-0">          },</span><br/><span class="hl-0">        },</span><br/><span class="hl-0">      ],</span><br/><span class="hl-0">    }),</span><br/><span class="hl-0">  );</span><br/><br/><span class="hl-0">  </span><span class="hl-9">return</span><span class="hl-0"> </span><span class="hl-1">server</span><span class="hl-0">;</span><br/><span class="hl-0">}</span>
+</code><button type="button">Copy</button></pre>
+
+<h3 id="key-differences-summary" class="tsd-anchor-link">Key Differences Summary<a href="#key-differences-summary" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ol>
+<li><strong>Metadata Structure</strong>: OpenAI uses flat <code>_meta[&quot;openai/...&quot;]</code> properties; MCP uses nested <code>_meta.ui.*</code> structure</li>
+<li><strong>Tool Visibility</strong>: OpenAI uses boolean/string (<code>true</code>/<code>&quot;public&quot;</code>); MCP uses string arrays (<code>[&quot;app&quot;, &quot;model&quot;]</code>)</li>
+<li><strong>CSP Field Names</strong>: snake_case → camelCase (e.g., <code>connect_domains</code> → <code>connectDomains</code>)</li>
+<li><strong>App Permissions</strong>: MCP adds <code>_meta.ui.permissions</code> for camera, microphone, geolocation, clipboard (not in OpenAI)</li>
+<li><strong>Resource MIME Type</strong>: <code>text/html+skybridge</code> → <code>text/html;profile=mcp-app</code> (use <code>RESOURCE_MIME_TYPE</code> constant)</li>
+<li><strong>Helper Functions</strong>: MCP provides <code>registerAppTool()</code> and <code>registerAppResource()</code> helpers</li>
+<li><strong>Not Yet Implemented</strong>: <code>_meta[&quot;openai/toolInvocation/invoking&quot;]</code>, <code>_meta[&quot;openai/toolInvocation/invoked&quot;]</code>, and <code>_meta[&quot;openai/widgetDescription&quot;]</code> don't have MCP equivalents yet</li>
+</ol>
+<h2 id="client-side" class="tsd-anchor-link">Client-Side<a href="#client-side" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Client-side migration involves replacing the implicit <code>window.openai</code> global with an explicit <code>App</code> instance.</p>
+<h3 id="quick-start-comparison-1" class="tsd-anchor-link">Quick Start Comparison<a href="#quick-start-comparison-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI Apps SDK</th>
+<th>MCP Apps SDK</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Implicit global (<code>window.openai</code>)</td>
+<td>Explicit instance (<code>new App(...)</code>)</td>
+</tr>
+<tr>
+<td>Properties pre-populated on load</td>
+<td>Async connection + notifications</td>
+</tr>
+<tr>
+<td>Sync property access</td>
+<td>Getters + event handlers</td>
+</tr>
+</tbody>
+</table>
+<h3 id="setup-connection" class="tsd-anchor-link">Setup &amp; Connection<a href="#setup-connection" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>window.openai</code> (auto-available)</td>
+<td><code>const app = new App({name, version})</code></td>
+<td>MCP requires explicit instantiation</td>
+</tr>
+<tr>
+<td>(implicit)</td>
+<td>Vanilla: <code>await app.connect()</code> / React: <code>useApp()</code></td>
+<td>MCP requires async connection; auto-detects OpenAI env</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>await app.connect(new OpenAITransport())</code></td>
+<td>Force OpenAI mode (not yet available, see <a href="https://github.com/modelcontextprotocol/ext-apps/pull/172" target="_blank" class="external">PR #172</a>)</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>await app.connect(new PostMessageTransport(...))</code></td>
+<td>Force MCP mode explicitly</td>
+</tr>
+</tbody>
+</table>
+<h3 id="host-context-properties" class="tsd-anchor-link">Host Context Properties<a href="#host-context-properties" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>window.openai.theme</code></td>
+<td><code>app.getHostContext()?.theme</code></td>
+<td><code>&quot;light&quot;</code> | <code>&quot;dark&quot;</code></td>
+</tr>
+<tr>
+<td><code>window.openai.locale</code></td>
+<td><code>app.getHostContext()?.locale</code></td>
+<td>BCP 47 language tag (e.g., <code>&quot;en-US&quot;</code>)</td>
+</tr>
+<tr>
+<td><code>window.openai.displayMode</code></td>
+<td><code>app.getHostContext()?.displayMode</code></td>
+<td><code>&quot;inline&quot;</code> | <code>&quot;pip&quot;</code> | <code>&quot;fullscreen&quot;</code></td>
+</tr>
+<tr>
+<td><code>window.openai.maxHeight</code></td>
+<td><code>app.getHostContext()?.viewport?.maxHeight</code></td>
+<td>Max container height in px</td>
+</tr>
+<tr>
+<td><code>window.openai.safeArea</code></td>
+<td><code>app.getHostContext()?.safeAreaInsets</code></td>
+<td><code>{ top, right, bottom, left }</code></td>
+</tr>
+<tr>
+<td><code>window.openai.userAgent</code></td>
+<td><code>app.getHostContext()?.userAgent</code></td>
+<td>Host user agent string</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>app.getHostContext()?.availableDisplayModes</code></td>
+<td>MCP adds: which modes host supports</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>app.getHostContext()?.toolInfo</code></td>
+<td>MCP adds: tool metadata during call</td>
+</tr>
+</tbody>
+</table>
+<h3 id="tool-data-inputoutput" class="tsd-anchor-link">Tool Data (Input/Output)<a href="#tool-data-inputoutput" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>window.openai.toolInput</code></td>
+<td><code>app.ontoolinput = (params) =&gt; { params.arguments }</code></td>
+<td>Tool arguments; MCP uses callback</td>
+</tr>
+<tr>
+<td><code>window.openai.toolOutput</code></td>
+<td><code>app.ontoolresult = (params) =&gt; { params.structuredContent }</code></td>
+<td>Tool result; MCP uses callback</td>
+</tr>
+<tr>
+<td><code>window.openai.toolResponseMetadata</code></td>
+<td><code>app.ontoolresult</code> → <code>params._meta</code></td>
+<td>Widget-only metadata from server</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>app.ontoolinputpartial = (params) =&gt; {...}</code></td>
+<td>MCP adds: streaming partial args</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>app.ontoolcancelled = (params) =&gt; {...}</code></td>
+<td>MCP adds: cancellation notification</td>
+</tr>
+</tbody>
+</table>
+<h3 id="calling-tools" class="tsd-anchor-link">Calling Tools<a href="#calling-tools" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>await window.openai.callTool(name, args)</code></td>
+<td><code>await app.callServerTool({ name, arguments: args })</code></td>
+<td>Call another MCP server tool</td>
+</tr>
+</tbody>
+</table>
+<h3 id="sending-messages" class="tsd-anchor-link">Sending Messages<a href="#sending-messages" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>await window.openai.sendFollowUpMessage({ prompt })</code></td>
+<td><code>await app.sendMessage({ role: &quot;user&quot;, content: [{ type: &quot;text&quot;, text: prompt }] })</code></td>
+<td>MCP uses structured content array</td>
+</tr>
+</tbody>
+</table>
+<h3 id="external-links" class="tsd-anchor-link">External Links<a href="#external-links" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>await window.openai.openExternal({ href })</code></td>
+<td><code>await app.openLink({ url: href })</code></td>
+<td>Different param name: <code>href</code> → <code>url</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="display-mode" class="tsd-anchor-link">Display Mode<a href="#display-mode" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>await window.openai.requestDisplayMode({ mode })</code></td>
+<td><code>await app.requestDisplayMode({ mode })</code></td>
+<td>Same API</td>
+</tr>
+<tr>
+<td>—</td>
+<td>Check <code>app.getHostContext()?.availableDisplayModes</code> first</td>
+<td>MCP lets you check what's available</td>
+</tr>
+</tbody>
+</table>
+<h3 id="size-reporting" class="tsd-anchor-link">Size Reporting<a href="#size-reporting" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>window.openai.notifyIntrinsicHeight(height)</code></td>
+<td><code>app.sendSizeChanged({ width, height })</code></td>
+<td>MCP includes width</td>
+</tr>
+<tr>
+<td>Manual only</td>
+<td><code>new App(appInfo, capabilities, { autoResize: true /* default */ })</code></td>
+<td>MCP auto-reports via <code>ResizeObserver</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="state-persistence" class="tsd-anchor-link">State Persistence<a href="#state-persistence" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>window.openai.widgetState</code></td>
+<td>—</td>
+<td>Not directly available in MCP</td>
+</tr>
+<tr>
+<td><code>window.openai.setWidgetState(state)</code></td>
+<td>—</td>
+<td>Use alternative mechanisms (<code>localStorage</code>, server-side state, etc.)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="file-operations-not-yet-in-mcp-apps" class="tsd-anchor-link">File Operations (Not Yet in MCP Apps)<a href="#file-operations-not-yet-in-mcp-apps" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>await window.openai.uploadFile(file)</code></td>
+<td>—</td>
+<td>Not yet implemented</td>
+</tr>
+<tr>
+<td><code>await window.openai.getFileDownloadUrl({ fileId })</code></td>
+<td>—</td>
+<td>Not yet implemented</td>
+</tr>
+</tbody>
+</table>
+<h3 id="other-not-yet-in-mcp-apps" class="tsd-anchor-link">Other (Not Yet in MCP Apps)<a href="#other-not-yet-in-mcp-apps" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>await window.openai.requestModal(options)</code></td>
+<td>—</td>
+<td>Not yet implemented</td>
+</tr>
+<tr>
+<td><code>window.openai.requestClose()</code></td>
+<td>—</td>
+<td>Not yet implemented</td>
+</tr>
+<tr>
+<td><code>window.openai.setOpenInAppUrl({ href })</code></td>
+<td>—</td>
+<td>Not yet implemented</td>
+</tr>
+<tr>
+<td><code>window.openai.view</code></td>
+<td>—</td>
+<td>Not yet mapped</td>
+</tr>
+</tbody>
+</table>
+<h3 id="event-handling" class="tsd-anchor-link">Event Handling<a href="#event-handling" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>window.openai.toolInput</code> (read on load)</td>
+<td><code>app.ontoolinput = (params) =&gt; {...}</code></td>
+<td>OpenAI: sync property; MCP: callback (register before <code>connect()</code>)</td>
+</tr>
+<tr>
+<td><code>window.openai.toolOutput</code> (read on load)</td>
+<td><code>app.ontoolresult = (params) =&gt; {...}</code></td>
+<td>OpenAI: sync property; MCP: callback (register before <code>connect()</code>)</td>
+</tr>
+<tr>
+<td><code>addEventListener(&quot;openai:set_globals&quot;, ...)</code></td>
+<td><code>app.onhostcontextchanged = (ctx) =&gt; {...}</code></td>
+<td>Both push updates; MCP uses callback, OpenAI uses DOM event</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>app.onteardown = async () =&gt; {...}</code></td>
+<td>MCP adds: cleanup before unmount</td>
+</tr>
+</tbody>
+</table>
+<h3 id="logging" class="tsd-anchor-link">Logging<a href="#logging" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>console.log(...)</code></td>
+<td><code>app.sendLog({ level: &quot;info&quot;, data: &quot;...&quot; })</code></td>
+<td>MCP provides structured logging</td>
+</tr>
+</tbody>
+</table>
+<h3 id="host-info" class="tsd-anchor-link">Host Info<a href="#host-info" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<table>
+<thead>
+<tr>
+<th>OpenAI</th>
+<th>MCP Apps</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>—</td>
+<td><code>app.getHostVersion()</code></td>
+<td>Returns <code>{ name, version }</code> of host</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>app.getHostCapabilities()</code></td>
+<td>Check <code>serverTools</code>, <code>openLinks</code>, <code>logging</code>, etc.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="client-side-migration-example" class="tsd-anchor-link">Client-Side Migration Example<a href="#client-side-migration-example" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<h4 id="before-openai-1" class="tsd-anchor-link">Before (OpenAI)<a href="#before-openai-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4>
+<pre><code class="typescript"><span class="hl-13">// OpenAI Apps SDK</span><br/><span class="hl-2">applyTheme</span><span class="hl-0">(</span><span class="hl-1">window</span><span class="hl-0">.</span><span class="hl-1">openai</span><span class="hl-0">.</span><span class="hl-1">theme</span><span class="hl-0">);</span><br/><span class="hl-1">console</span><span class="hl-0">.</span><span class="hl-2">log</span><span class="hl-0">(</span><span class="hl-3">&quot;Tool args:&quot;</span><span class="hl-0">, </span><span class="hl-1">window</span><span class="hl-0">.</span><span class="hl-1">openai</span><span class="hl-0">.</span><span class="hl-1">toolInput</span><span class="hl-0">);</span><br/><span class="hl-1">console</span><span class="hl-0">.</span><span class="hl-2">log</span><span class="hl-0">(</span><span class="hl-3">&quot;Tool result:&quot;</span><span class="hl-0">, </span><span class="hl-1">window</span><span class="hl-0">.</span><span class="hl-1">openai</span><span class="hl-0">.</span><span class="hl-1">toolOutput</span><span class="hl-0">);</span><br/><br/><span class="hl-13">// Call a tool</span><br/><span class="hl-4">const</span><span class="hl-0"> </span><span class="hl-10">result</span><span class="hl-0"> = </span><span class="hl-9">await</span><span class="hl-0"> </span><span class="hl-1">window</span><span class="hl-0">.</span><span class="hl-1">openai</span><span class="hl-0">.</span><span class="hl-2">callTool</span><span class="hl-0">(</span><span class="hl-3">&quot;get_weather&quot;</span><span class="hl-0">, { </span><span class="hl-1">city:</span><span class="hl-0"> </span><span class="hl-3">&quot;Tokyo&quot;</span><span class="hl-0"> });</span><br/><br/><span class="hl-13">// Send a message</span><br/><span class="hl-9">await</span><span class="hl-0"> </span><span class="hl-1">window</span><span class="hl-0">.</span><span class="hl-1">openai</span><span class="hl-0">.</span><span class="hl-2">sendFollowUpMessage</span><span class="hl-0">({ </span><span class="hl-1">prompt:</span><span class="hl-0"> </span><span class="hl-3">&quot;Weather updated!&quot;</span><span class="hl-0"> });</span><br/><br/><span class="hl-13">// Report height</span><br/><span class="hl-1">window</span><span class="hl-0">.</span><span class="hl-1">openai</span><span class="hl-0">.</span><span class="hl-2">notifyIntrinsicHeight</span><span class="hl-0">(</span><span class="hl-15">400</span><span class="hl-0">);</span><br/><br/><span class="hl-13">// Open link</span><br/><span class="hl-9">await</span><span class="hl-0"> </span><span class="hl-1">window</span><span class="hl-0">.</span><span class="hl-1">openai</span><span class="hl-0">.</span><span class="hl-2">openExternal</span><span class="hl-0">({ </span><span class="hl-1">href:</span><span class="hl-0"> </span><span class="hl-3">&quot;https://example.com&quot;</span><span class="hl-0"> });</span>
+</code><button type="button">Copy</button></pre>
+
+<h4 id="after-mcp-apps-1" class="tsd-anchor-link">After (MCP Apps)<a href="#after-mcp-apps-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h4>
+<pre><code class="typescript"><span class="hl-9">import</span><span class="hl-0"> { </span><span class="hl-1">App</span><span class="hl-0"> } </span><span class="hl-9">from</span><span class="hl-0"> </span><span class="hl-3">&quot;@modelcontextprotocol/ext-apps&quot;</span><span class="hl-0">;</span><br/><br/><span class="hl-4">const</span><span class="hl-0"> </span><span class="hl-10">app</span><span class="hl-0"> = </span><span class="hl-4">new</span><span class="hl-0"> </span><span class="hl-2">App</span><span class="hl-0">({ </span><span class="hl-1">name:</span><span class="hl-0"> </span><span class="hl-3">&quot;MyApp&quot;</span><span class="hl-0">, </span><span class="hl-1">version:</span><span class="hl-0"> </span><span class="hl-3">&quot;1.0.0&quot;</span><span class="hl-0"> });</span><br/><br/><span class="hl-13">// Register handlers BEFORE connect (events may occur immediately after connect)</span><br/><span class="hl-1">app</span><span class="hl-0">.</span><span class="hl-2">ontoolinput</span><span class="hl-0"> = (</span><span class="hl-1">params</span><span class="hl-0">) </span><span class="hl-4">=&gt;</span><span class="hl-0"> {</span><br/><span class="hl-0">  </span><span class="hl-1">console</span><span class="hl-0">.</span><span class="hl-2">log</span><span class="hl-0">(</span><span class="hl-3">&quot;Tool args:&quot;</span><span class="hl-0">, </span><span class="hl-1">params</span><span class="hl-0">.</span><span class="hl-1">arguments</span><span class="hl-0">);</span><br/><span class="hl-0">};</span><br/><br/><span class="hl-1">app</span><span class="hl-0">.</span><span class="hl-2">ontoolresult</span><span class="hl-0"> = (</span><span class="hl-1">params</span><span class="hl-0">) </span><span class="hl-4">=&gt;</span><span class="hl-0"> {</span><br/><span class="hl-0">  </span><span class="hl-1">console</span><span class="hl-0">.</span><span class="hl-2">log</span><span class="hl-0">(</span><span class="hl-3">&quot;Tool result:&quot;</span><span class="hl-0">, </span><span class="hl-1">params</span><span class="hl-0">.</span><span class="hl-1">structuredContent</span><span class="hl-0">);</span><br/><span class="hl-0">};</span><br/><br/><span class="hl-1">app</span><span class="hl-0">.</span><span class="hl-2">onhostcontextchanged</span><span class="hl-0"> = (</span><span class="hl-1">ctx</span><span class="hl-0">) </span><span class="hl-4">=&gt;</span><span class="hl-0"> {</span><br/><span class="hl-0">  </span><span class="hl-9">if</span><span class="hl-0"> (</span><span class="hl-1">ctx</span><span class="hl-0">.</span><span class="hl-1">theme</span><span class="hl-0">) </span><span class="hl-2">applyTheme</span><span class="hl-0">(</span><span class="hl-1">ctx</span><span class="hl-0">.</span><span class="hl-1">theme</span><span class="hl-0">);</span><br/><span class="hl-0">};</span><br/><br/><span class="hl-13">// Connect (auto-detects OpenAI vs MCP)</span><br/><span class="hl-9">await</span><span class="hl-0"> </span><span class="hl-1">app</span><span class="hl-0">.</span><span class="hl-2">connect</span><span class="hl-0">();</span><br/><br/><span class="hl-13">// Access context</span><br/><span class="hl-2">applyTheme</span><span class="hl-0">(</span><span class="hl-1">app</span><span class="hl-0">.</span><span class="hl-2">getHostContext</span><span class="hl-0">()?.</span><span class="hl-1">theme</span><span class="hl-0">);</span><br/><br/><span class="hl-13">// Call a tool</span><br/><span class="hl-4">const</span><span class="hl-0"> </span><span class="hl-10">result</span><span class="hl-0"> = </span><span class="hl-9">await</span><span class="hl-0"> </span><span class="hl-1">app</span><span class="hl-0">.</span><span class="hl-2">callServerTool</span><span class="hl-0">({</span><br/><span class="hl-0">  </span><span class="hl-1">name:</span><span class="hl-0"> </span><span class="hl-3">&quot;get_weather&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">  </span><span class="hl-1">arguments:</span><span class="hl-0"> { </span><span class="hl-1">city:</span><span class="hl-0"> </span><span class="hl-3">&quot;Tokyo&quot;</span><span class="hl-0"> },</span><br/><span class="hl-0">});</span><br/><br/><span class="hl-13">// Send a message</span><br/><span class="hl-9">await</span><span class="hl-0"> </span><span class="hl-1">app</span><span class="hl-0">.</span><span class="hl-2">sendMessage</span><span class="hl-0">({</span><br/><span class="hl-0">  </span><span class="hl-1">role:</span><span class="hl-0"> </span><span class="hl-3">&quot;user&quot;</span><span class="hl-0">,</span><br/><span class="hl-0">  </span><span class="hl-1">content:</span><span class="hl-0"> [{ </span><span class="hl-1">type:</span><span class="hl-0"> </span><span class="hl-3">&quot;text&quot;</span><span class="hl-0">, </span><span class="hl-1">text:</span><span class="hl-0"> </span><span class="hl-3">&quot;Weather updated!&quot;</span><span class="hl-0"> }],</span><br/><span class="hl-0">});</span><br/><br/><span class="hl-13">// Open link (note: url not href)</span><br/><span class="hl-9">await</span><span class="hl-0"> </span><span class="hl-1">app</span><span class="hl-0">.</span><span class="hl-2">openLink</span><span class="hl-0">({ </span><span class="hl-1">url:</span><span class="hl-0"> </span><span class="hl-3">&quot;https://example.com&quot;</span><span class="hl-0"> });</span>
+</code><button type="button">Copy</button></pre>
+
+<h3 id="key-differences-summary-1" class="tsd-anchor-link">Key Differences Summary<a href="#key-differences-summary-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<ol>
+<li><strong>Initialization</strong>: OpenAI is implicit; MCP requires <code>new App()</code> + <code>await app.connect()</code></li>
+<li><strong>Data Flow</strong>: OpenAI pre-populates; MCP uses async notifications (register handlers before <code>connect()</code>)</li>
+<li><strong>Auto-resize</strong>: MCP has built-in ResizeObserver support via <code>autoResize</code> option</li>
+<li><strong>Structured Content</strong>: MCP uses <code>{ type: &quot;text&quot;, text: &quot;...&quot; }</code> arrays for messages</li>
+<li><strong>Context Changes</strong>: MCP pushes updates via <code>onhostcontextchanged</code>; no polling needed</li>
+<li><strong>Capabilities</strong>: MCP lets you check what the host supports before calling methods</li>
+</ol>
+</div></div><div class="col-sidebar"><div class="page-menu"><div class="tsd-navigation settings"><details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg><h3>Settings</h3></summary><div class="tsd-accordion-details"><div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span><ul id="tsd-filter-options"><li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li><li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li><li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div><div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div><details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg><h3>On This Page</h3></summary><div class="tsd-accordion-details"><a href="#migrating-from-openai-apps-sdk-to-mcp-apps-sdk"><span>Migrating from <wbr/>Open<wbr/>AI <wbr/>Apps <wbr/>SDK to <wbr/>MCP <wbr/>Apps <wbr/>SDK</span></a><ul><li><a href="#server-side"><span>Server-<wbr/>Side</span></a></li><li><ul><li><a href="#quick-start-comparison"><span>Quick <wbr/>Start <wbr/>Comparison</span></a></li><li><a href="#tool-metadata"><span>Tool <wbr/>Metadata</span></a></li><li><a href="#resource-metadata"><span>Resource <wbr/>Metadata</span></a></li><li><a href="#resource-mime-type"><span>Resource <wbr/>MIME <wbr/>Type</span></a></li><li><a href="#csp-field-mapping"><span>CSP <wbr/>Field <wbr/>Mapping</span></a></li><li><a href="#server-side-migration-example"><span>Server-<wbr/>Side <wbr/>Migration <wbr/>Example</span></a></li><li><ul><li><a href="#before-openai"><span>Before (<wbr/>Open<wbr/>AI)</span></a></li><li><a href="#after-mcp-apps"><span>After (<wbr/>MCP <wbr/>Apps)</span></a></li></ul></li><li><a href="#key-differences-summary"><span>Key <wbr/>Differences <wbr/>Summary</span></a></li></ul></li><li><a href="#client-side"><span>Client-<wbr/>Side</span></a></li><li><ul><li><a href="#quick-start-comparison-1"><span>Quick <wbr/>Start <wbr/>Comparison</span></a></li><li><a href="#setup-connection"><span>Setup &amp; <wbr/>Connection</span></a></li><li><a href="#host-context-properties"><span>Host <wbr/>Context <wbr/>Properties</span></a></li><li><a href="#tool-data-inputoutput"><span>Tool <wbr/>Data (<wbr/>Input/<wbr/>Output)</span></a></li><li><a href="#calling-tools"><span>Calling <wbr/>Tools</span></a></li><li><a href="#sending-messages"><span>Sending <wbr/>Messages</span></a></li><li><a href="#external-links"><span>External <wbr/>Links</span></a></li><li><a href="#display-mode"><span>Display <wbr/>Mode</span></a></li><li><a href="#size-reporting"><span>Size <wbr/>Reporting</span></a></li><li><a href="#state-persistence"><span>State <wbr/>Persistence</span></a></li><li><a href="#file-operations-not-yet-in-mcp-apps"><span>File <wbr/>Operations (<wbr/>Not <wbr/>Yet in <wbr/>MCP <wbr/>Apps)</span></a></li><li><a href="#other-not-yet-in-mcp-apps"><span>Other (<wbr/>Not <wbr/>Yet in <wbr/>MCP <wbr/>Apps)</span></a></li><li><a href="#event-handling"><span>Event <wbr/>Handling</span></a></li><li><a href="#logging"><span>Logging</span></a></li><li><a href="#host-info"><span>Host <wbr/>Info</span></a></li><li><a href="#client-side-migration-example"><span>Client-<wbr/>Side <wbr/>Migration <wbr/>Example</span></a></li><li><ul><li><a href="#before-openai-1"><span>Before (<wbr/>Open<wbr/>AI)</span></a></li><li><a href="#after-mcp-apps-1"><span>After (<wbr/>MCP <wbr/>Apps)</span></a></li></ul></li><li><a href="#key-differences-summary-1"><span>Key <wbr/>Differences <wbr/>Summary</span></a></li></ul></li></ul></div></details></div><div class="site-menu"><nav id="tsd-sidebar-links" class="tsd-navigation"><a href="https://github.com/modelcontextprotocol/ext-apps" class="tsd-nav-link">GitHub</a><a href="https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx" class="tsd-nav-link">Specification</a></nav><nav class="tsd-navigation"><a href="../modules.html">MCP Apps</a><ul class="tsd-small-nested-navigation" id="tsd-nav-container"><li>Loading...</li></ul></nav></div></div></div><footer><p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a> with <a href="https://github.com/JulianWowra/typedoc-github-theme" target="_blank">typedoc-github-theme</a></p></footer><div class="overlay"></div><script>(function(){function norm(s){return s.replace(/\/$/,"").replace(/\.html$/,"");}function mark(){var p=norm(location.pathname);var links=document.querySelectorAll(".site-menu .tsd-navigation a[href]");for(var i=0;i<links.length;i++){var h=norm(new URL(links[i].href,location.href).pathname);if(h===p){links[i].classList.add("current");return true;}}return false;}function init(){if(!mark()){var c=document.getElementById("tsd-nav-container");if(c){new MutationObserver(function(m,o){if(mark())o.disconnect();}).observe(c,{childList:true,subtree:true});}}}if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",init);}else{init();}})();</script>
+</body></html>
