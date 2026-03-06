@@ -2194,9 +2194,36 @@ function toggleAnnotationPanel(): void {
   setAnnotationPanelOpen(annotationPanelUserPref);
 }
 
-/** Total count of annotations + filled form fields for the sidebar badge. */
+/**
+ * Derived state of a form field relative to the PDF baseline.
+ * Not stored — computed on demand by comparing formFieldValues to
+ * pdfBaselineFormValues.
+ */
+type FieldState =
+  | "unchanged" // current === baseline (came from the PDF, untouched)
+  | "modified" //  baseline exists but current differs
+  | "cleared" //   baseline exists but current is absent/empty
+  | "added"; //    no baseline — user-filled or fill_form
+
+function fieldState(name: string): FieldState {
+  const cur = formFieldValues.get(name);
+  const base = pdfBaselineFormValues.get(name);
+  if (base === undefined) return "added";
+  if (cur === undefined || cur === "" || cur === false) return "cleared";
+  return cur === base ? "unchanged" : "modified";
+}
+
+/** All field names that should appear in the panel: current ∪ baseline.
+ *  Cleared baseline fields remain visible (crossed out) so they can be
+ *  reverted individually. */
+function panelFieldNames(): Set<string> {
+  return new Set([...formFieldValues.keys(), ...pdfBaselineFormValues.keys()]);
+}
+
+/** Total count of annotations + form fields for the sidebar badge.
+ *  Uses the union so cleared baseline items still contribute. */
 function sidebarItemCount(): number {
-  return annotationMap.size + formFieldValues.size;
+  return annotationMap.size + panelFieldNames().size;
 }
 
 function updateAnnotationsBadge(): void {
@@ -2327,12 +2354,19 @@ function renderAnnotationPanel(): void {
     byPage.get(page)!.push(tracked);
   }
 
-  // Group form fields by page
-  const fieldsByPage = new Map<number, [string, string | boolean][]>();
-  for (const [name, value] of formFieldValues) {
+  // Group form fields by page — iterate the UNION so cleared baseline
+  // fields remain visible (crossed out) with a per-item revert button.
+  const fieldsByPage = new Map<number, string[]>();
+  for (const name of panelFieldNames()) {
     const page = fieldNameToPage.get(name) ?? 1;
     if (!fieldsByPage.has(page)) fieldsByPage.set(page, []);
-    fieldsByPage.get(page)!.push([name, value]);
+    fieldsByPage.get(page)!.push(name);
+  }
+  // Sort fields by their intrinsic document order within each page
+  for (const names of fieldsByPage.values()) {
+    names.sort(
+      (a, b) => (fieldNameToOrder.get(a) ?? 0) - (fieldNameToOrder.get(b) ?? 0),
+    );
   }
 
   // Collect all pages that have annotations or form fields
@@ -2369,8 +2403,8 @@ function renderAnnotationPanel(): void {
       pageNum === currentPage,
       (body) => {
         // Form fields first
-        for (const [name, value] of fields) {
-          body.appendChild(createFormFieldCard(name, value));
+        for (const name of fields) {
+          body.appendChild(createFormFieldCard(name));
         }
         // Then annotations
         for (const tracked of annotations) {
@@ -2541,32 +2575,56 @@ function createAnnotationCard(tracked: TrackedAnnotation): HTMLElement {
   return card;
 }
 
-function createFormFieldCard(
-  name: string,
-  value: string | boolean,
-): HTMLElement {
+const TRASH_SVG = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 3h8M4.5 3V2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5v1M5 5.5v3M7 5.5v3M3 3l.5 7a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1L9 3"/></svg>`;
+const REVERT_SVG = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6a4 4 0 1 1 1.2 2.85"/><path d="M2 9V6h3"/></svg>`;
+
+/** Revert one field to its PDF-stored baseline value. */
+function revertFieldToBaseline(name: string): void {
+  const base = pdfBaselineFormValues.get(name);
+  if (base === undefined) return;
+  formFieldValues.set(name, base);
+  // Remove our storage override → widget falls back to PDF's /V = baseline
+  if (pdfDocument) {
+    const ids = fieldNameToIds.get(name);
+    if (ids) for (const id of ids) pdfDocument.annotationStorage.remove(id);
+  }
+}
+
+function createFormFieldCard(name: string): HTMLElement {
+  const state = fieldState(name);
+  const value = formFieldValues.get(name);
+  const baseValue = pdfBaselineFormValues.get(name);
+
   const card = document.createElement("div");
   card.className = "annotation-card";
+  if (state === "cleared") card.classList.add("annotation-card-cleared");
 
   const row = document.createElement("div");
   row.className = "annotation-card-row";
 
-  // Color swatch (blue for form fields)
+  // Swatch: solid blue normally; crossed-out for cleared baseline fields
   const swatch = document.createElement("div");
   swatch.className = "annotation-card-swatch";
-  swatch.style.background = "#4a90d9";
+  if (state === "cleared") {
+    swatch.classList.add("annotation-card-swatch-cleared");
+    swatch.innerHTML = `<svg width="10" height="10" viewBox="0 0 10 10" stroke="#4a90d9" stroke-width="1.5" stroke-linecap="round"><path d="M2 2l6 6M8 2L2 8"/></svg>`;
+  } else {
+    swatch.style.background = "#4a90d9";
+  }
+  // Subtle modified marker
+  if (state === "modified") swatch.title = "Modified from file";
   row.appendChild(swatch);
 
   // Field label
-  const label = getFormFieldLabel(name);
   const nameEl = document.createElement("span");
   nameEl.className = "annotation-card-type";
-  nameEl.textContent = label;
+  nameEl.textContent = getFormFieldLabel(name);
   row.appendChild(nameEl);
 
-  // Field value preview
+  // Value preview: show current, or struck-out baseline when cleared
+  const shown = state === "cleared" ? baseValue : value;
   const displayValue =
-    typeof value === "boolean" ? (value ? "checked" : "unchecked") : value;
+    typeof shown === "boolean" ? (shown ? "checked" : "unchecked") : shown;
   if (displayValue) {
     const valueEl = document.createElement("span");
     valueEl.className = "annotation-card-preview";
@@ -2574,21 +2632,28 @@ function createFormFieldCard(
     row.appendChild(valueEl);
   }
 
-  // Delete button
-  const deleteBtn = document.createElement("button");
-  deleteBtn.className = "annotation-card-delete";
-  deleteBtn.title = "Clear field";
-  deleteBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 3h8M4.5 3V2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5v1M5 5.5v3M7 5.5v3M3 3l.5 7a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1L9 3"/></svg>`;
-  deleteBtn.addEventListener("click", (e) => {
+  // Action button: revert for modified/cleared baseline fields, trash otherwise
+  const isRevertable = state === "modified" || state === "cleared";
+  const actionBtn = document.createElement("button");
+  actionBtn.className = "annotation-card-delete";
+  actionBtn.title = isRevertable
+    ? "Revert to value stored in file"
+    : "Clear field";
+  actionBtn.innerHTML = isRevertable ? REVERT_SVG : TRASH_SVG;
+  actionBtn.addEventListener("click", (e) => {
     e.stopPropagation();
-    formFieldValues.delete(name);
-    clearFieldInStorage(name);
+    if (isRevertable) {
+      revertFieldToBaseline(name);
+    } else {
+      formFieldValues.delete(name);
+      clearFieldInStorage(name);
+    }
     updateAnnotationsBadge();
     renderAnnotationPanel();
     renderPage();
     persistAnnotations();
   });
-  row.appendChild(deleteBtn);
+  row.appendChild(actionBtn);
 
   // Click handler: navigate to page and focus form input
   card.addEventListener("click", () => {
@@ -2853,20 +2918,14 @@ function clearFieldInStorage(name: string): void {
   for (const id of ids) storage.setValue(id, { value: clearValue });
 }
 
-/** Remove all user-sourced entries from annotationStorage, leaving the
- *  PDF's own stored values intact. */
-function clearUserFormStorage(): void {
-  if (!pdfDocument) return;
-  for (const [name] of formFieldValues) {
-    if (pdfBaselineFormValues.has(name)) continue; // PDF-native — leave alone
-    const ids = fieldNameToIds.get(name);
-    if (ids) for (const id of ids) pdfDocument.annotationStorage.remove(id);
-  }
-}
-
 /**
  * Revert to what's in the PDF file: restore baseline annotations, restore
  * baseline form values, discard all user edits. Result: diff is empty, clean.
+ *
+ * Form fields: remove ALL storage overrides — every field reverts to the
+ * PDF's /V (which IS baseline). We can't skip baseline-named fields: if the
+ * user edited one, our override is in storage under that name, and skipping
+ * it leaves the widget showing the stale edit.
  */
 function resetToBaseline(): void {
   clearAnnotationMap();
@@ -2874,7 +2933,16 @@ function resetToBaseline(): void {
     annotationMap.set(def.id, { def: { ...def }, elements: [] });
   }
 
-  clearUserFormStorage();
+  if (pdfDocument) {
+    const storage = pdfDocument.annotationStorage;
+    for (const name of new Set([
+      ...formFieldValues.keys(),
+      ...pdfBaselineFormValues.keys(),
+    ])) {
+      const ids = fieldNameToIds.get(name);
+      if (ids) for (const id of ids) storage.remove(id);
+    }
+  }
   formFieldValues.clear();
   for (const [name, value] of pdfBaselineFormValues) {
     formFieldValues.set(name, value);

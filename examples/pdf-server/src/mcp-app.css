@@ -1046,6 +1046,23 @@ body {
   border: 1px solid rgba(0, 0, 0, 0.15);
 }
 
+/* Swatch for baseline items the user cleared — outlined with a cross
+   instead of solid fill, so the panel still shows "this existed in the
+   file and you removed it" rather than vanishing. */
+.annotation-card-swatch-cleared {
+  background: transparent;
+  border-color: #4a90d9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.annotation-card-cleared .annotation-card-type,
+.annotation-card-cleared .annotation-card-preview {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
 .annotation-card-type {
   font-size: 0.7rem;
   color: var(--text200);
