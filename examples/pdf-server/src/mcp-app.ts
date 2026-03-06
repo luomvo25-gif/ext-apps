@@ -3398,9 +3398,20 @@ async function buildFieldNameMap(
   }
 
   // Import baseline values from getFieldObjects() (the only place .value lives)
+  // AND remap its field-dict IDs to widget IDs.
+  //
+  // Why remap: pdf.js _bindResetFormAction (the PDF's in-document Reset
+  // button) iterates this structure, using .id to key storage and find DOM
+  // elements via [data-element-id=...]. Both use WIDGET ids — pdf.js Reset
+  // only works when field-dict id == widget id. pdf-lib's save splits
+  // merged field+widget objects, breaking that assumption. We rebuild with
+  // widget ids so Reset keeps working.
   if (cachedFieldObjects) {
+    const remapped: Record<string, any[]> = {};
     for (const [name, fieldArr] of Object.entries(cachedFieldObjects)) {
-      if (!fieldNameToIds.has(name)) continue; // no widget → not rendered
+      const widgetIds = fieldNameToIds.get(name);
+      if (!widgetIds) continue; // no widget → not rendered anyway
+
       const v = importFieldValue(fieldArr);
       if (v !== null) {
         pdfBaselineFormValues.set(name, v);
@@ -3409,7 +3420,19 @@ async function buildFieldNameMap(
         // overwrite specific fields the user changed.
         if (!formFieldValues.has(name)) formFieldValues.set(name, v);
       }
+
+      // Skip parent entries with no concrete id (radio groups: the /T tree
+      // has a parent with the export value, plus one child per widget).
+      const concrete = fieldArr.filter((f) => f.id && f.type);
+      // Remap: one entry per widget, copying type/defaultValue/exportValues
+      // from the corresponding field entry (or the first concrete one if
+      // counts differ — e.g. text fields have 1 field entry but 1 widget).
+      remapped[name] = widgetIds.map((wid, i) => ({
+        ...(concrete[i] ?? concrete[0] ?? fieldArr[0]),
+        id: wid,
+      }));
     }
+    cachedFieldObjects = remapped;
   }
 
   log.info(`Built field name map: ${fieldNameToIds.size} fields`);
