@@ -3374,22 +3374,34 @@ function restoreAnnotations(): void {
 // =============================================================================
 
 /**
- * Extract a meaningful value from a getFieldObjects() field array.
- * Returns null for empty/unfilled/button fields so they don't clutter
- * the panel or count as baseline edits.
+ * Normalise a raw form field value into our string|boolean model.
+ * Returns null for empty/unfilled/button values so they don't clutter the
+ * panel or count as baseline.
+ *
+ * `type` is from getFieldObjects() (which knows field types); `raw` is
+ * preferably from page.getAnnotations().fieldValue (which is what the
+ * widget actually renders). A PDF can have the field-dict /V out of sync
+ * with the widget — AnnotationLayer trusts the widget, so we must too.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function importFieldValue(fieldArr: any[]): string | boolean | null {
-  // For radio groups, getFieldObjects returns a parent entry with
-  // value=undefined plus child entries — find the first with a real value.
-  const f = fieldArr.find((x) => x.value != null) ?? fieldArr[0];
-  if (!f || f.type === "button") return null;
-  const v = f.value;
-  if (v == null || v === "" || v === "Off") return null;
-  if (f.type === "checkbox") return true;
-  if (f.type === "radiobutton") return String(v);
-  if (Array.isArray(v)) return v.join(", ");
-  return String(v);
+function normaliseFieldValue(
+  type: string | undefined,
+  raw: unknown,
+): string | boolean | null {
+  if (type === "button") return null;
+  // Checkbox/radio: fieldValue is the export string (e.g. "Yes"), "Off" = unset
+  if (type === "checkbox") {
+    return raw != null && raw !== "" && raw !== "Off" ? true : null;
+  }
+  if (type === "radiobutton") {
+    return raw != null && raw !== "" && raw !== "Off" ? String(raw) : null;
+  }
+  // Text/choice: fieldValue may be a string or an array of selections
+  if (Array.isArray(raw)) {
+    const joined = raw.filter(Boolean).join(", ");
+    return joined || null;
+  }
+  if (raw == null || raw === "") return null;
+  return String(raw);
 }
 
 /**
@@ -3422,8 +3434,11 @@ async function buildFieldNameMap(
   }
 
   // Scan every page's widget annotations to collect the CORRECT storage keys,
-  // plus labels, pages, and positions (which getFieldObjects() lacks anyway).
+  // plus labels, pages, positions, AND fieldValue (what the widget renders
+  // — which can differ from getFieldObjects().value if the PDF is internally
+  // inconsistent, e.g. after a pdf-lib setText silently failed).
   const fieldPositions: Array<{ name: string; page: number; y: number }> = [];
+  const widgetFieldValues = new Map<string, unknown>();
   for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
     let annotations;
     try {
@@ -3451,6 +3466,11 @@ async function buildFieldNameMap(
       if (a.rect) {
         fieldPositions.push({ name: a.fieldName, page: pageNum, y: a.rect[3] });
       }
+      // Capture the value the widget will actually render. First widget wins
+      // (radio groups share the field's /V so they all match anyway).
+      if (!widgetFieldValues.has(a.fieldName) && a.fieldValue !== undefined) {
+        widgetFieldValues.set(a.fieldName, a.fieldValue);
+      }
     }
   }
 
@@ -3465,22 +3485,31 @@ async function buildFieldNameMap(
     }
   }
 
-  // Import baseline values from getFieldObjects() (the only place .value lives)
-  // AND remap its field-dict IDs to widget IDs.
+  // Import baseline values AND remap cachedFieldObjects to widget IDs.
   //
-  // Why remap: pdf.js _bindResetFormAction (the PDF's in-document Reset
-  // button) iterates this structure, using .id to key storage and find DOM
-  // elements via [data-element-id=...]. Both use WIDGET ids — pdf.js Reset
-  // only works when field-dict id == widget id. pdf-lib's save splits
-  // merged field+widget objects, breaking that assumption. We rebuild with
-  // widget ids so Reset keeps working.
+  // Baseline: prefer the widget's fieldValue (what AnnotationLayer renders)
+  // over getFieldObjects().value. A PDF can have the field-dict /V out of
+  // sync with the widget — if we import the field-dict value, the panel
+  // disagrees with what's on screen.
+  //
+  // Remap: pdf.js _bindResetFormAction (the PDF's in-document Reset button)
+  // iterates this structure, using .id to key storage and find DOM elements
+  // via [data-element-id=...]. Both use WIDGET ids. pdf-lib's save splits
+  // merged field+widget objects, so we rebuild with widget ids.
   if (cachedFieldObjects) {
     const remapped: Record<string, any[]> = {};
     for (const [name, fieldArr] of Object.entries(cachedFieldObjects)) {
       const widgetIds = fieldNameToIds.get(name);
       if (!widgetIds) continue; // no widget → not rendered anyway
 
-      const v = importFieldValue(fieldArr);
+      // Type comes from getFieldObjects (widget annot data doesn't have it).
+      // Value comes from the widget annotation (fall back to field-dict if
+      // the widget didn't expose one).
+      const type = fieldArr.find((f) => f.type)?.type;
+      const raw = widgetFieldValues.has(name)
+        ? widgetFieldValues.get(name)
+        : fieldArr.find((f) => f.value != null)?.value;
+      const v = normaliseFieldValue(type, raw);
       if (v !== null) {
         pdfBaselineFormValues.set(name, v);
         // Seed current state from baseline so the panel shows it. A
@@ -3492,9 +3521,6 @@ async function buildFieldNameMap(
       // Skip parent entries with no concrete id (radio groups: the /T tree
       // has a parent with the export value, plus one child per widget).
       const concrete = fieldArr.filter((f) => f.id && f.type);
-      // Remap: one entry per widget, copying type/defaultValue/exportValues
-      // from the corresponding field entry (or the first concrete one if
-      // counts differ — e.g. text fields have 1 field entry but 1 widget).
       remapped[name] = widgetIds.map((wid, i) => ({
         ...(concrete[i] ?? concrete[0] ?? fieldArr[0]),
         id: wid,
