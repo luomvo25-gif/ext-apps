@@ -11,10 +11,16 @@ import {
   CallToolResultSchema,
   EmptyResultSchema,
   Implementation,
+  ListResourcesRequest,
+  ListResourcesResult,
+  ListResourcesResultSchema,
   ListToolsRequest,
   ListToolsRequestSchema,
   LoggingMessageNotification,
   PingRequestSchema,
+  ReadResourceRequest,
+  ReadResourceResult,
+  ReadResourceResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { AppNotification, AppRequest, AppResult } from "./types";
 import { PostMessageTransport } from "./message-transport";
@@ -69,12 +75,30 @@ export {
  * When hosts see a tool with this metadata, they fetch and render the
  * corresponding {@link App `App`}.
  *
- * **Note**: This constant is provided for reference. App developers typically
- * don't need to use it directly. Prefer using {@link server-helpers!registerAppTool `registerAppTool`}
- * with the `_meta.ui.resourceUri` format instead.
+ * **Note**: This constant is provided for reference and backwards compatibility.
+ * Server developers should use {@link server-helpers!registerAppTool `registerAppTool`}
+ * with the `_meta.ui.resourceUri` format instead. Host developers must check both
+ * formats for compatibility.
  *
- * @example How MCP servers use this key (server-side, not in Apps)
- * ```ts source="./app.examples.ts#RESOURCE_URI_META_KEY_serverSide"
+ * @example Modern format (server-side, not in Apps)
+ * ```ts source="./app.examples.ts#RESOURCE_URI_META_KEY_modernFormat"
+ * // Preferred: Use registerAppTool with nested ui.resourceUri
+ * registerAppTool(
+ *   server,
+ *   "weather",
+ *   {
+ *     description: "Get weather forecast",
+ *     _meta: {
+ *       ui: { resourceUri: "ui://weather/forecast" },
+ *     },
+ *   },
+ *   handler,
+ * );
+ * ```
+ *
+ * @example Legacy format (deprecated, for backwards compatibility)
+ * ```ts source="./app.examples.ts#RESOURCE_URI_META_KEY_legacyFormat"
+ * // Deprecated: Direct use of RESOURCE_URI_META_KEY
  * server.registerTool(
  *   "weather",
  *   {
@@ -87,10 +111,13 @@ export {
  * );
  * ```
  *
- * @example How hosts check for this metadata (host-side)
+ * @example How hosts check for this metadata (must support both formats)
  * ```ts source="./app.examples.ts#RESOURCE_URI_META_KEY_hostSide"
- * // Check tool definition metadata (from tools/list response):
- * const uiUri = tool._meta?.[RESOURCE_URI_META_KEY];
+ * // Hosts should check both modern and legacy formats
+ * const meta = tool._meta;
+ * const uiMeta = meta?.ui as McpUiToolMeta | undefined;
+ * const legacyUri = meta?.[RESOURCE_URI_META_KEY] as string | undefined;
+ * const uiUri = uiMeta?.resourceUri ?? legacyUri;
  * if (typeof uiUri === "string" && uiUri.startsWith("ui://")) {
  *   // Fetch the resource and display the UI
  * }
@@ -740,6 +767,104 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
   }
 
   /**
+   * Read a resource from the originating MCP server (proxied through the host).
+   *
+   * Apps can read resources to access files, data, or other content provided by
+   * the MCP server. Resources are identified by URI (e.g., `file:///path/to/file`
+   * or custom schemes like `videos://bunny-1mb`). The host proxies the request to
+   * the actual MCP server and returns the resource content.
+   *
+   * @param params - Resource URI to read
+   * @param options - Request options (timeout, etc.)
+   * @returns Resource content with URI, name, description, mimeType, and contents array
+   *
+   * @throws {Error} If the resource does not exist on the server
+   * @throws {Error} If the request times out or the connection is lost
+   * @throws {Error} If the host rejects the request
+   *
+   * @example Read a video resource and play it
+   * ```ts source="./app.examples.ts#App_readServerResource_playVideo"
+   * try {
+   *   const result = await app.readServerResource({
+   *     uri: "videos://bunny-1mb",
+   *   });
+   *   const content = result.contents[0];
+   *   if (content && "blob" in content) {
+   *     const binary = Uint8Array.from(atob(content.blob), (c) =>
+   *       c.charCodeAt(0),
+   *     );
+   *     const url = URL.createObjectURL(
+   *       new Blob([binary], { type: content.mimeType || "video/mp4" }),
+   *     );
+   *     videoElement.src = url;
+   *     videoElement.play();
+   *   }
+   * } catch (error) {
+   *   console.error("Failed to read resource:", error);
+   * }
+   * ```
+   *
+   * @see {@link listServerResources `listServerResources`} to discover available resources
+   */
+  async readServerResource(
+    params: ReadResourceRequest["params"],
+    options?: RequestOptions,
+  ): Promise<ReadResourceResult> {
+    return await this.request(
+      { method: "resources/read", params },
+      ReadResourceResultSchema,
+      options,
+    );
+  }
+
+  /**
+   * List available resources from the originating MCP server (proxied through the host).
+   *
+   * Apps can list resources to discover what content is available on the MCP server.
+   * This enables dynamic resource discovery and building resource browsers or pickers.
+   * The host proxies the request to the actual MCP server and returns the resource list.
+   *
+   * Results may be paginated using the `cursor` parameter for servers with many resources.
+   *
+   * @param params - Optional parameters (omit for all resources, or `{ cursor }` for pagination)
+   * @param options - Request options (timeout, etc.)
+   * @returns List of resources with their URIs, names, descriptions, mimeTypes, and optional pagination cursor
+   *
+   * @throws {Error} If the request times out or the connection is lost
+   * @throws {Error} If the host rejects the request
+   *
+   * @example Discover available videos and build a picker UI
+   * ```ts source="./app.examples.ts#App_listServerResources_buildPicker"
+   * try {
+   *   const result = await app.listServerResources();
+   *   const videoResources = result.resources.filter((r) =>
+   *     r.mimeType?.startsWith("video/"),
+   *   );
+   *   videoResources.forEach((resource) => {
+   *     const option = document.createElement("option");
+   *     option.value = resource.uri;
+   *     option.textContent = resource.description || resource.name;
+   *     selectElement.appendChild(option);
+   *   });
+   * } catch (error) {
+   *   console.error("Failed to list resources:", error);
+   * }
+   * ```
+   *
+   * @see {@link readServerResource `readServerResource`} to read a specific resource
+   */
+  async listServerResources(
+    params?: ListResourcesRequest["params"],
+    options?: RequestOptions,
+  ): Promise<ListResourcesResult> {
+    return await this.request(
+      { method: "resources/list", params },
+      ListResourcesResultSchema,
+      options,
+    );
+  }
+
+  /**
    * Send a message to the host's chat interface.
    *
    * Enables the app to add messages to the conversation thread. Useful for
@@ -1119,13 +1244,14 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
         scheduled = false;
         const html = document.documentElement;
 
-        // Measure actual content size by temporarily setting html to fit-content.
-        // This shrinks html to fit body (including body margins), giving us the
-        // true minimum size needed by the content.
+        // Measure actual content size by temporarily overriding html sizing.
+        // Width uses fit-content so content wraps at the host-provided width.
+        // Height uses max-content because fit-content would clamp to the viewport
+        // height when content is taller than the iframe, causing internal scrolling.
         const originalWidth = html.style.width;
         const originalHeight = html.style.height;
         html.style.width = "fit-content";
-        html.style.height = "fit-content";
+        html.style.height = "max-content";
         const rect = html.getBoundingClientRect();
         html.style.width = originalWidth;
         html.style.height = originalHeight;

@@ -1,5 +1,7 @@
 ---
 title: Testing MCP Apps
+group: Getting Started
+description: Test MCP Apps locally with the basic-host reference implementation or in production hosts like Claude.ai and VS Code.
 ---
 
 # Test Your MCP App

@@ -1,5 +1,7 @@
 ---
 title: Agent Skills
+group: Getting Started
+description: Use Agent Skills to build, migrate, and extend MCP Apps with AI coding agents. Install skills that scaffold new apps, convert OpenAI Apps, and add UI to existing servers.
 ---
 
 # Agent Skills
