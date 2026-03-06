@@ -153,16 +153,43 @@ export function load(app) {
       );
     }
 
-    // Inject JSON-LD before </head>
+    // Build favicon tags with correct relative path
+    const depth = page.url.split("/").length - 1;
+    const base = depth > 0 ? "../".repeat(depth) : "./";
+    const faviconTags = [
+      `<link rel="icon" href="${base}favicons/favicon-32x32.png" type="image/png" sizes="32x32" media="(prefers-color-scheme: light)"/>`,
+      `<link rel="icon" href="${base}favicons/favicon-16x16.png" type="image/png" sizes="16x16" media="(prefers-color-scheme: light)"/>`,
+      `<link rel="shortcut icon" href="${base}favicons/favicon.ico" type="image/x-icon" media="(prefers-color-scheme: light)"/>`,
+      `<link rel="icon" href="${base}favicons/favicon-dark-32x32.png" type="image/png" sizes="32x32" media="(prefers-color-scheme: dark)"/>`,
+      `<link rel="icon" href="${base}favicons/favicon-dark-16x16.png" type="image/png" sizes="16x16" media="(prefers-color-scheme: dark)"/>`,
+      `<link rel="shortcut icon" href="${base}favicons/favicon-dark.ico" type="image/x-icon" media="(prefers-color-scheme: dark)"/>`,
+      `<link rel="apple-touch-icon" href="${base}favicons/apple-touch-icon.png" type="image/png" sizes="180x180"/>`,
+    ].join("\n");
+
+    // Inject JSON-LD and favicons before </head>
     page.contents = page.contents.replace(
       "</head>",
-      jsonLdScript + "\n</head>",
+      faviconTags + "\n" + jsonLdScript + "\n</head>",
     );
   });
 
-  // --- Post-render: rename document files to lowercase-hyphenated slugs ---
+  // --- Post-render: copy favicons + rename document slugs ---
   app.renderer.on(Renderer.EVENT_END, (event) => {
     const outDir = event.outputDirectory;
+
+    // Copy favicons to output directory
+    const srcFavicons = path.join(path.dirname(outDir), "favicons");
+    const destFavicons = path.join(outDir, "favicons");
+    if (fs.existsSync(srcFavicons)) {
+      if (!fs.existsSync(destFavicons)) fs.mkdirSync(destFavicons);
+      for (const file of fs.readdirSync(srcFavicons)) {
+        fs.copyFileSync(
+          path.join(srcFavicons, file),
+          path.join(destFavicons, file),
+        );
+      }
+    }
+
     const docsDir = path.join(outDir, "documents");
 
     if (!fs.existsSync(docsDir)) return;
