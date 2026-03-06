@@ -18,7 +18,11 @@ fi
 # (avoids sweeping unrelated WIP into the commit)
 STAGED=$(git diff --name-only --cached)
 
-npm run build:all
+# Build SDK only (regenerates src/generated/, emits dist/ needed by example typecheck)
+npm run build
+# Fast batch typecheck of SDK + all examples via tsgo (~2s). Replaces the full
+# examples:build bundle step — CI still does the full build.
+npm run typecheck
 npm run prettier:fix
 
 # Re-stage originally-staged files (prettier may have reformatted them)

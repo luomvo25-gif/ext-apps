@@ -53,6 +53,7 @@
     "build": "npm run generate:schemas && npm run sync:snippets && node scripts/run-bun.mjs build.bun.ts && node scripts/link-self.mjs",
     "prepack": "npm run build",
     "build:all": "npm run examples:build",
+    "typecheck": "node scripts/typecheck.mjs",
     "test": "bun test src examples",
     "test:e2e": "playwright test",
     "test:e2e:update": "playwright test --update-snapshots",
@@ -103,6 +104,7 @@
     "typedoc": "^0.28.14",
     "typedoc-github-theme": "^0.4.0",
     "typescript": "^5.9.3",
+    "@typescript/native-preview": "7.0.0-dev.20260305.1",
     "bun": "^1.2.21",
     "zod": "^4.1.13"
   },

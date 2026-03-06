@@ -83,7 +83,13 @@ jobs:
         if: runner.os == 'Linux' && matrix.name == 'Linux x64'
         run: npm exec typedoc -- --treatValidationWarningsAsErrors --emit none
 
-      - run: npm run examples:build
+      # Fast-fail typecheck of SDK + all examples (~46 tsconfigs) in one tsgo process.
+      # Replaces the per-example `tsc --noEmit` that used to run inside examples:build.
+      - run: npm run typecheck
+
+      # examples:build runs `npm run build` again via preexamples:build — skip that
+      # since we already built the SDK above. Call the runner directly.
+      - run: npx bun examples/run-all.ts build
 
       - name: Verify generated schemas are up-to-date
         shell: bash
@@ -162,7 +168,8 @@ jobs:
         run: |
           npm ci
           npm run build
-          npm run examples:build
+          npm run typecheck
+          npx bun examples/run-all.ts build
           npm test
           npm run prettier
 
