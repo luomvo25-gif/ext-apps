@@ -1174,23 +1174,61 @@ export function createServer(options: CreateServerOptions = {}): McpServer {
     "List available PDFs that can be displayed",
     {},
     async (): Promise<CallToolResult> => {
-      const pdfs: Array<{ url: string; type: "local" | "remote" }> = [];
+      const seen = new Set<string>();
+      const localFiles: string[] = [];
+      const addLocal = (filePath: string) => {
+        const url = pathToFileUrl(filePath);
+        if (seen.has(url)) return;
+        seen.add(url);
+        localFiles.push(url);
+      };
 
-      // Add local files
-      for (const filePath of allowedLocalFiles) {
-        pdfs.push({ url: pathToFileUrl(filePath), type: "local" });
-      }
+      // Explicitly registered files (CLI args + file roots)
+      for (const filePath of allowedLocalFiles) addLocal(filePath);
+
+      // Walk directory roots for *.pdf files
+      const WALK_MAX_DEPTH = 8;
+      const WALK_MAX_FILES = 500;
+      let truncated = false;
+      const walk = async (dir: string, depth: number): Promise<void> => {
+        if (depth > WALK_MAX_DEPTH || localFiles.length >= WALK_MAX_FILES) {
+          truncated ||= localFiles.length >= WALK_MAX_FILES;
+          return;
+        }
+        let entries;
+        try {
+          entries = await fs.promises.readdir(dir, { withFileTypes: true });
+        } catch {
+          return; // unreadable — skip silently
+        }
+        for (const e of entries) {
+          if (localFiles.length >= WALK_MAX_FILES) {
+            truncated = true;
+            return;
+          }
+          // Skip dotfiles/dirs and common noise
+          if (e.name.startsWith(".") || e.name === "node_modules") continue;
+          const full = path.join(dir, e.name);
+          if (e.isDirectory()) {
+            await walk(full, depth + 1);
+          } else if (e.isFile() && /\.pdf$/i.test(e.name)) {
+            addLocal(full);
+          }
+        }
+      };
+      for (const dir of allowedLocalDirs) await walk(dir, 0);
 
       // Build text
       const parts: string[] = [];
-      if (pdfs.length > 0) {
-        parts.push(
-          `Available PDFs:\n${pdfs.map((p) => `- ${p.url} (${p.type})`).join("\n")}`,
-        );
+      if (localFiles.length > 0) {
+        const header = truncated
+          ? `Available PDFs (showing first ${WALK_MAX_FILES}):`
+          : `Available PDFs:`;
+        parts.push(`${header}\n${localFiles.map((u) => `- ${u}`).join("\n")}`);
       }
       if (allowedLocalDirs.size > 0) {
         parts.push(
-          `Allowed local directories (from client roots):\n${[...allowedLocalDirs].map((d) => `- ${d}`).join("\n")}\nAny PDF file under these directories can be displayed.`,
+          `Allowed local directories:\n${[...allowedLocalDirs].map((d) => `- ${d}`).join("\n")}\nAny PDF file under these directories can be displayed.`,
         );
       }
       parts.push(
@@ -1200,8 +1238,9 @@ export function createServer(options: CreateServerOptions = {}): McpServer {
       return {
         content: [{ type: "text", text: parts.join("\n\n") }],
         structuredContent: {
-          localFiles: pdfs.filter((p) => p.type === "local").map((p) => p.url),
+          localFiles,
           allowedDirectories: [...allowedLocalDirs],
+          truncated,
         },
       };
     },
