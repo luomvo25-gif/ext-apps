@@ -88,7 +88,7 @@ async function waitForPdfCanvas(page: Page) {
 }
 
 test.describe("PDF Server - Annotations", () => {
-  test("display_pdf result mentions annotation capabilities", async ({
+  test("display_pdf result includes viewUUID and interactEnabled meta", async ({
     page,
   }) => {
     await loadPdfServer(page);
@@ -103,12 +103,11 @@ test.describe("PDF Server - Annotations", () => {
     await expect(resultContent).toBeVisible({ timeout: 5000 });
     const resultText = (await resultContent.textContent()) ?? "";
 
-    // Verify the result text enumerates interact actions including annotations
-    expect(resultText).toContain("add_annotations");
-    expect(resultText).toContain("highlight_text");
-    expect(resultText).toContain("navigate");
-    expect(resultText).toContain("get_pages");
-    expect(resultText).toContain("stamps");
+    // The result should carry the viewUUID and interact flag in _meta / structuredContent
+    // (interact action list lives in the tool description, not the runtime result).
+    expect(resultText).toContain("viewUUID");
+    expect(resultText).toContain("interactEnabled");
+    expect(resultText).toContain("Displaying PDF");
   });
 
   test("interact tool is available in tool dropdown", async ({ page }) => {
