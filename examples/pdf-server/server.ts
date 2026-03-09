@@ -94,6 +94,26 @@ export const allowedLocalDirs = new Set<string>();
  */
 export const cliLocalFiles = new Set<string>();
 
+/**
+ * Saving is allowed iff:
+ *   (a) the file was passed as a CLI arg — the user explicitly named it
+ *       when starting the server, so overwriting is clearly intentional; OR
+ *   (b) the file is STRICTLY UNDER a directory root at any depth
+ *       (isAncestorDir excludes rel === "", so the root itself never
+ *       counts), AND the client did not ALSO send it as a file root.
+ *       A file root is the client's way of saying "here's an upload" —
+ *       treat that signal as authoritative even when the path happens
+ *       to fall inside a mounted directory.
+ *
+ * With no directory roots and no CLI files, nothing is writable.
+ */
+export function isWritablePath(resolved: string): boolean {
+  if (cliLocalFiles.has(resolved)) return true;
+  // MCP file root → always read-only, regardless of ancestry
+  if (allowedLocalFiles.has(resolved)) return false;
+  return [...allowedLocalDirs].some((dir) => isAncestorDir(dir, resolved));
+}
+
 // Works both from source (server.ts) and compiled (dist/server.js)
 const DIST_DIR = import.meta.filename.endsWith(".ts")
   ? path.join(import.meta.dirname, "dist")
@@ -1357,30 +1377,15 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
       const { totalBytes } = await readPdfRange(normalized, 0, 1);
       const uuid = randomUUID();
 
-      // Check writability for local files (governs save button visibility).
-      //
-      // Writable only if:
-      //   (a) the file was passed as a CLI arg — the user explicitly named
-      //       it when starting the server, so overwriting is clearly
-      //       intentional; OR
-      //   (b) the file is STRICTLY UNDER a directory root (isAncestorDir
-      //       excludes rel === "", so the root itself doesn't count).
-      //       Directory roots are mounted folders where saving makes sense.
-      //   AND the process has OS write permission.
-      //
-      // NOT writable: file roots from the MCP client. Those are typically
-      // uploaded copies in ad-hoc hidden folders (e.g. Claude Desktop's
-      // uploads directory) — the client doesn't expect them to change.
+      // Check writability (governs save button; see isWritablePath doc).
+      // Also requires OS-level W_OK so we don't lie on read-only mounts.
       let writable = false;
       if (isFileUrl(normalized) || isLocalPath(normalized)) {
         const localPath = isFileUrl(normalized)
           ? fileUrlToPath(normalized)
           : decodeURIComponent(normalized);
         const resolved = path.resolve(localPath);
-        const inWriteScope =
-          cliLocalFiles.has(resolved) ||
-          [...allowedLocalDirs].some((dir) => isAncestorDir(dir, resolved));
-        if (inWriteScope) {
+        if (isWritablePath(resolved)) {
           try {
             await fs.promises.access(resolved, fs.constants.W_OK);
             writable = true;
@@ -2356,10 +2361,7 @@ Example — add a signature image and a stamp, then screenshot to verify:
       // Enforce the same write scope the display_pdf writable flag uses.
       // The viewer hides the save button for non-writable files, but we
       // must not trust the client: a direct save_pdf call should also refuse.
-      const inWriteScope =
-        cliLocalFiles.has(resolved) ||
-        [...allowedLocalDirs].some((dir) => isAncestorDir(dir, resolved));
-      if (!inWriteScope) {
+      if (!isWritablePath(resolved)) {
         return {
           content: [
             {

@@ -15,6 +15,7 @@ import {
   startFileWatch,
   stopFileWatch,
   cliLocalFiles,
+  isWritablePath,
   CACHE_INACTIVITY_TIMEOUT_MS,
   CACHE_MAX_LIFETIME_MS,
   CACHE_MAX_PDF_SIZE_BYTES,
@@ -454,6 +455,79 @@ describe("createServer useClientRoots option", () => {
   });
 });
 
+describe("isWritablePath", () => {
+  let savedFiles: Set<string>;
+  let savedDirs: Set<string>;
+  let savedCli: Set<string>;
+
+  beforeEach(() => {
+    savedFiles = new Set(allowedLocalFiles);
+    savedDirs = new Set(allowedLocalDirs);
+    savedCli = new Set(cliLocalFiles);
+    allowedLocalFiles.clear();
+    allowedLocalDirs.clear();
+    cliLocalFiles.clear();
+  });
+
+  afterEach(() => {
+    allowedLocalFiles.clear();
+    allowedLocalDirs.clear();
+    cliLocalFiles.clear();
+    for (const x of savedFiles) allowedLocalFiles.add(x);
+    for (const x of savedDirs) allowedLocalDirs.add(x);
+    for (const x of savedCli) cliLocalFiles.add(x);
+  });
+
+  it("nothing is writable when no roots and no CLI files", () => {
+    expect(isWritablePath("/any/path/file.pdf")).toBe(false);
+  });
+
+  it("CLI file is writable", () => {
+    allowedLocalFiles.add("/tmp/explicit.pdf");
+    cliLocalFiles.add("/tmp/explicit.pdf");
+    expect(isWritablePath("/tmp/explicit.pdf")).toBe(true);
+  });
+
+  it("MCP file root is NOT writable", () => {
+    allowedLocalFiles.add("/tmp/uploaded.pdf"); // from refreshRoots, no CLI
+    expect(isWritablePath("/tmp/uploaded.pdf")).toBe(false);
+  });
+
+  it("file under a directory root at any depth is writable", () => {
+    allowedLocalDirs.add("/home/user/docs");
+    expect(isWritablePath("/home/user/docs/file.pdf")).toBe(true);
+    expect(isWritablePath("/home/user/docs/sub/deep/file.pdf")).toBe(true);
+  });
+
+  it("the directory root itself is NOT writable", () => {
+    allowedLocalDirs.add("/home/user/docs");
+    expect(isWritablePath("/home/user/docs")).toBe(false);
+  });
+
+  it("MCP file root stays read-only even when under a directory root", () => {
+    // Client sent BOTH the directory and a file inside it as roots.
+    // The explicit file-root is the stronger signal: treat as upload.
+    allowedLocalDirs.add("/home/user/docs");
+    allowedLocalFiles.add("/home/user/docs/uploaded.pdf");
+    expect(isWritablePath("/home/user/docs/uploaded.pdf")).toBe(false);
+    // Siblings not sent as file roots remain writable
+    expect(isWritablePath("/home/user/docs/other.pdf")).toBe(true);
+  });
+
+  it("CLI file wins even if also in allowedLocalFiles", () => {
+    // CLI file added to both sets (main.ts does this)
+    allowedLocalFiles.add("/tmp/cli.pdf");
+    cliLocalFiles.add("/tmp/cli.pdf");
+    expect(isWritablePath("/tmp/cli.pdf")).toBe(true);
+  });
+
+  it("file outside any directory root is not writable", () => {
+    allowedLocalDirs.add("/home/user/docs");
+    expect(isWritablePath("/home/user/other/file.pdf")).toBe(false);
+    expect(isWritablePath("/home/user/docsevil/file.pdf")).toBe(false);
+  });
+});
+
 describe("file watching", () => {
   let tmpDir: string;
   let tmpFile: string;
@@ -612,8 +686,10 @@ describe("file watching", () => {
   });
 
   it("save_pdf allows files under a directory root", async () => {
-    // File NOT in cliLocalFiles but under a mounted directory root
+    // File is under a mounted directory root — but NOT itself a file root
+    // (a file root, even under a mounted dir, is read-only per isWritablePath).
     cliLocalFiles.delete(tmpFile);
+    allowedLocalFiles.delete(tmpFile);
     allowedLocalDirs.add(tmpDir);
 
     const server = createServer({ enableInteract: true });
