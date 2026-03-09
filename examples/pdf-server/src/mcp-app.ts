@@ -57,6 +57,31 @@ const log = {
   error: console.error.bind(console, "[PDF-VIEWER]"),
 };
 
+/**
+ * Return `url` only if it parses to a scheme safe for `<img src>`, else
+ * undefined. Blocks `javascript:` / `vbscript:` etc. to satisfy CodeQL's
+ * js/xss + js/client-side-unvalidated-url-redirection checks. The server
+ * normally resolves imageUrl to imageData; this is defense-in-depth for
+ * the fetch-failure fallback path.
+ */
+function safeImageSrc(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const scheme = new URL(url, document.baseURI).protocol;
+    if (
+      scheme === "https:" ||
+      scheme === "http:" ||
+      scheme === "data:" ||
+      scheme === "blob:"
+    ) {
+      return url;
+    }
+  } catch {
+    // fall through
+  }
+  return undefined;
+}
+
 // State
 let pdfDocument: pdfjsLib.PDFDocumentProxy | null = null;
 let currentPage = 1;
@@ -1704,7 +1729,7 @@ function paintAnnotationsOnCanvas(
           // Load image asynchronously into cache for next paint
           const src = def.imageData
             ? `data:${def.mimeType || "image/png"};base64,${def.imageData}`
-            : def.imageUrl;
+            : safeImageSrc(def.imageUrl);
           if (src) {
             const img = new Image();
             img.onload = () => {
@@ -1988,7 +2013,7 @@ function renderImageAnnotation(
 
   const imgSrc = def.imageData
     ? `data:${def.mimeType || "image/png"};base64,${def.imageData}`
-    : def.imageUrl;
+    : safeImageSrc(def.imageUrl);
   if (imgSrc) {
     const img = document.createElement("img");
     img.src = imgSrc;
