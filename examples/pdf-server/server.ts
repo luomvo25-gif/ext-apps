@@ -2461,9 +2461,12 @@ Example — add a signature image and a stamp, then screenshot to verify:
               ui: {
                 permissions: { clipboardWrite: {} },
                 csp: {
-                  // pdf.js fetches the PDF Standard-14 fonts via fetch(),
-                  // mapped to CSP connect-src.
+                  // pdf.js loads the Standard-14 fonts TWO ways:
+                  //   - fetch()s the .ttf bytes → connect-src
+                  //   - creates FontFace('name', 'url(...)') → font-src
+                  // resourceDomains maps to font-src; we need both.
                   connectDomains: [STANDARD_FONT_ORIGIN],
+                  resourceDomains: [STANDARD_FONT_ORIGIN],
                 },
               },
             },
