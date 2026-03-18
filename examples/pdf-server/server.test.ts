@@ -785,3 +785,180 @@ describe("file watching", () => {
     },
   );
 });
+
+describe("interact tool", () => {
+  // Helper: connected server+client pair with interact enabled.
+  // Command queues are MODULE-LEVEL (shared across server instances), so each
+  // test uses a distinct viewUUID to avoid cross-test interference.
+  async function connect() {
+    const server = createServer({ enableInteract: true });
+    const client = new Client({ name: "t", version: "1" });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(st), client.connect(ct)]);
+    return { server, client };
+  }
+
+  // Helper: poll with an outer deadline so a failing test doesn't hang for the
+  // full 30s long-poll. Safe ONLY when a command is already enqueued — poll
+  // then returns after the 200ms batch window.
+  async function poll(client: Client, uuid: string, timeoutMs = 2000) {
+    const result = await Promise.race([
+      client.callTool({
+        name: "poll_pdf_commands",
+        arguments: { viewUUID: uuid },
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("poll timeout")), timeoutMs),
+      ),
+    ]);
+    return (
+      (result as { structuredContent?: { commands?: unknown[] } })
+        .structuredContent?.commands ?? []
+    ) as Array<Record<string, unknown>>;
+  }
+
+  function firstText(r: Awaited<ReturnType<Client["callTool"]>>): string {
+    return (r.content as Array<{ type: string; text: string }>)[0].text;
+  }
+
+  it("enqueue → poll roundtrip delivers the command", async () => {
+    const { server, client } = await connect();
+    const uuid = "test-interact-roundtrip";
+
+    const r = await client.callTool({
+      name: "interact",
+      arguments: { viewUUID: uuid, action: "navigate", page: 5 },
+    });
+    expect(r.isError).toBeFalsy();
+    expect(firstText(r)).toContain("Queued");
+    expect(firstText(r)).toContain("page 5");
+
+    // Core mechanism: the viewer polls for what the model enqueued.
+    const cmds = await poll(client, uuid);
+    expect(cmds).toHaveLength(1);
+    expect(cmds[0].type).toBe("navigate");
+    expect(cmds[0].page).toBe(5);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("navigate without `page` returns isError with a helpful message", async () => {
+    const { server, client } = await connect();
+
+    const r = await client.callTool({
+      name: "interact",
+      arguments: { viewUUID: "test-err-nav", action: "navigate" },
+    });
+    expect(r.isError).toBe(true);
+    expect(firstText(r)).toContain("navigate");
+    expect(firstText(r)).toContain("page");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("fill_form without `fields` returns isError with a helpful message", async () => {
+    const { server, client } = await connect();
+
+    const r = await client.callTool({
+      name: "interact",
+      arguments: { viewUUID: "test-err-fill", action: "fill_form" },
+    });
+    expect(r.isError).toBe(true);
+    expect(firstText(r)).toContain("fill_form");
+    expect(firstText(r)).toContain("fields");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("add_annotations without `annotations` returns isError with a helpful message", async () => {
+    const { server, client } = await connect();
+
+    const r = await client.callTool({
+      name: "interact",
+      arguments: { viewUUID: "test-err-ann", action: "add_annotations" },
+    });
+    expect(r.isError).toBe(true);
+    expect(firstText(r)).toContain("add_annotations");
+    expect(firstText(r)).toContain("annotations");
+
+    await client.close();
+    await server.close();
+  });
+
+  it("isolates command queues across distinct viewUUIDs", async () => {
+    const { server, client } = await connect();
+    const uuidA = "test-isolate-A";
+    const uuidB = "test-isolate-B";
+
+    await client.callTool({
+      name: "interact",
+      arguments: { viewUUID: uuidA, action: "navigate", page: 3 },
+    });
+    await client.callTool({
+      name: "interact",
+      arguments: { viewUUID: uuidB, action: "search", query: "quantum" },
+    });
+
+    const cmdsA = await poll(client, uuidA);
+    expect(cmdsA).toHaveLength(1);
+    expect(cmdsA[0].type).toBe("navigate");
+    expect(cmdsA[0].page).toBe(3);
+
+    const cmdsB = await poll(client, uuidB);
+    expect(cmdsB).toHaveLength(1);
+    expect(cmdsB[0].type).toBe("search");
+    expect(cmdsB[0].query).toBe("quantum");
+
+    await client.close();
+    await server.close();
+  });
+
+  // SKIPPED: the unknown-UUID path enters the long-poll branch and blocks for
+  // the full LONG_POLL_TIMEOUT_MS (30s, module-local const, not configurable).
+  // The handler does dequeue [] at the end, so the return value IS
+  // {commands: []} — but there's no fast path to reach it without waiting.
+  // See the `stopFileWatch prevents further commands` test above for indirect
+  // coverage of the same blocking behaviour.
+  it.skip("poll with unknown viewUUID returns {commands: []} after long-poll", () => {});
+
+  it("fill_form passes all fields through when viewFieldNames is not registered", async () => {
+    const { server, client } = await connect();
+    // Fresh UUID never seen by display_pdf → viewFieldNames.get(uuid) is
+    // undefined → the known-fields guard (`knownFields && !knownFields.has()`)
+    // is falsy for every field → everything is enqueued.
+    const uuid = "test-fillform-passthrough";
+
+    const r = await client.callTool({
+      name: "interact",
+      arguments: {
+        viewUUID: uuid,
+        action: "fill_form",
+        fields: [
+          { name: "anything", value: "goes" },
+          { name: "unchecked", value: true },
+        ],
+      },
+    });
+    expect(r.isError).toBeFalsy();
+    expect(firstText(r)).toContain("Filled 2 field(s)");
+    // No rejection complaint — the registry has no entry for this UUID
+    expect(firstText(r)).not.toContain("Unknown");
+
+    const cmds = await poll(client, uuid);
+    expect(cmds).toHaveLength(1);
+    expect(cmds[0].type).toBe("fill_form");
+    const fields = cmds[0].fields as Array<{ name: string; value: unknown }>;
+    expect(fields).toHaveLength(2);
+    expect(fields.map((f) => f.name).sort()).toEqual(["anything", "unchecked"]);
+
+    // Note: the "registered → reject unknown" branch needs viewFieldNames
+    // populated, which only happens inside display_pdf (requires a real PDF).
+    // That map isn't exported, so the rejection path is covered by e2e only.
+
+    await client.close();
+    await server.close();
+  });
+});
