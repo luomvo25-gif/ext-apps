@@ -269,6 +269,45 @@ describe("computeDiff", () => {
     expect(diff.added).toEqual([]);
   });
 
+  it("captures modification of a USER-ADDED annotation (id not in baseline)", () => {
+    // User adds a stamp, then edits its label. The stamp's id was never
+    // in the baseline → it stays in `added` with its latest content.
+    const editedStamp: PdfAnnotationDef = {
+      type: "stamp",
+      id: "user-s1",
+      page: 1,
+      x: 300,
+      y: 400,
+      label: "FINAL", // was "DRAFT" originally, now edited
+    };
+    const diff = computeDiff([pdfNote], [pdfNote, editedStamp], new Map());
+    expect(diff.added).toEqual([editedStamp]);
+    expect(diff.added[0]).toMatchObject({ label: "FINAL" });
+  });
+
+  it("KNOWN LIMITATION: in-place edit of a baseline annotation is lost", () => {
+    // Editing a PDF-native note's content: same id as baseline, different
+    // content. computeDiff is id-set based — same-id → neither added nor
+    // removed. The edit vanishes on reload.
+    //
+    // Viewer mitigation: addAnnotation() always removeAnnotation(id) first,
+    // so the common UI path is remove+add. But updateAnnotation() mutates
+    // in place — if the interact tool's update_annotations edits a baseline
+    // annotation, that edit won't survive a page reload.
+    const editedNote: PdfAnnotationDef = {
+      ...pdfNote,
+      content: "Edited by user",
+    };
+    const diff = computeDiff(
+      [pdfNote, pdfHighlight],
+      [editedNote, pdfHighlight],
+      new Map(),
+    );
+    expect(diff.added).toEqual([]);
+    expect(diff.removed).toEqual([]);
+    // If this starts FAILING, the limitation was fixed — update expectations.
+  });
+
   it("captures form field values", () => {
     const fields = new Map<string, string | boolean>([
       ["name", "Alice"],
