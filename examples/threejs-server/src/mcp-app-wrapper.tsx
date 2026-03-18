@@ -4,7 +4,12 @@
  * Generic wrapper that handles MCP App connection and passes all relevant
  * props to the actual view component.
  */
-import type { App, McpUiHostContext } from "@modelcontextprotocol/ext-apps";
+import {
+  applyDocumentTheme,
+  applyHostStyleVariables,
+  type App,
+  type McpUiHostContext,
+} from "@modelcontextprotocol/ext-apps";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { StrictMode, useState, useEffect } from "react";
@@ -36,6 +41,11 @@ export interface ViewProps<TToolInput = Record<string, unknown>> {
 // =============================================================================
 // MCP App Wrapper
 // =============================================================================
+
+function applyHostStyle(ctx: McpUiHostContext) {
+  if (ctx.theme) applyDocumentTheme(ctx.theme);
+  if (ctx.styles?.variables) applyHostStyleVariables(ctx.styles.variables);
+}
 
 function McpAppWrapper() {
   const [toolInputs, setToolInputs] = useState<Record<string, unknown> | null>(
@@ -69,44 +79,19 @@ function McpAppWrapper() {
       // Note: we handle styles here instead of using useHostStyles,
       // because useHostStyles overwrites onhostcontextchanged.
       app.onhostcontextchanged = (params) => {
-        const root = document.documentElement;
-        if (params.theme) {
-          root.setAttribute("data-theme", params.theme);
-          root.style.colorScheme = params.theme;
-        }
-        if (params.styles?.variables) {
-          for (const [k, v] of Object.entries(params.styles.variables)) {
-            if (v !== undefined) root.style.setProperty(k, v as string);
-          }
-        }
+        applyHostStyle(params);
         setHostContext((prev) => ({ ...prev, ...params }));
       };
     },
   });
 
-  // Apply initial host styles
+  // Apply initial host styles and context after connection
   useEffect(() => {
     if (!app) return;
     const ctx = app.getHostContext();
-    const root = document.documentElement;
-    if (ctx?.theme) {
-      root.setAttribute("data-theme", ctx.theme);
-      root.style.colorScheme = ctx.theme;
-    }
-    if (ctx?.styles?.variables) {
-      for (const [k, v] of Object.entries(ctx.styles.variables)) {
-        if (v !== undefined) root.style.setProperty(k, v as string);
-      }
-    }
-  }, [app]);
-
-  // Get initial host context after connection
-  useEffect(() => {
-    if (app) {
-      const ctx = app.getHostContext();
-      if (ctx) {
-        setHostContext(ctx);
-      }
+    if (ctx) {
+      applyHostStyle(ctx);
+      setHostContext(ctx);
     }
   }, [app]);
 
