@@ -149,6 +149,20 @@ bun examples/pdf-server/main.ts ./local.pdf https://arxiv.org/pdf/2401.00001.pdf
 bun examples/pdf-server/main.ts --stdio ./papers/
 ```
 
+### Additional Flags
+
+- `--debug` — Enable verbose server-side logging.
+- `--enable-interact` — Enable the `interact` tool in HTTP mode (see [Deployment](#deployment)). Not needed for stdio.
+- `--writeable-uploads-root` — Allow saving annotated PDFs back to files under client roots named `uploads` (Claude Desktop mounts attachments there; writes are refused by default).
+
+## Deployment
+
+The `interact` tool relies on an in-memory command queue (server enqueues → viewer polls). This constrains how the server can be deployed:
+
+- **stdio** (Claude Desktop) — `interact` is always enabled. The server runs as a single long-lived process, so the in-memory queue works.
+- **HTTP, single instance** — Pass `--enable-interact` to opt in. Works as long as all requests land on the same process.
+- **HTTP, stateless / multi-instance** — `interact` will not work. Commands enqueued on one instance are invisible to viewers polling another. Leave the flag off; the tool will not be registered.
+
 ## Security: Client Roots
 
 MCP clients may advertise **roots** — `file://` URIs pointing to directories on the client's file system. The server uses these to allow access to local files under those directories.
@@ -178,9 +192,11 @@ When roots are ignored the server logs:
 | ---------------- | ---------- | ----------------------------------------------------- |
 | `list_pdfs`      | Model      | List available local files and origins                |
 | `display_pdf`    | Model + UI | Display interactive viewer                            |
-| `interact`       | Model      | Navigate, annotate, search, extract pages, fill forms |
+| `interact`¹      | Model      | Navigate, annotate, search, extract pages, fill forms |
 | `read_pdf_bytes` | App only   | Stream PDF data in chunks                             |
 | `save_pdf`       | App only   | Save annotated PDF back to local file                 |
+
+¹ stdio only by default; in HTTP mode requires `--enable-interact` — see [Deployment](#deployment).
 
 ## Example Prompts
 
@@ -198,7 +214,7 @@ After the model calls `display_pdf`, it receives the `viewUUID` and a descriptio
 
 > **User:** Can you annotate this PDF? Mark important sections for me.
 >
-> _Model calls `interact` with `get_pages` to read content first, then `add_annotations` with highlights/notes_
+> _Model calls `interact` with `get_text` to read content first, then `add_annotations` with highlights/notes_
 
 > **User:** Add a note on page 1 saying "Key contribution" at position (200, 500), and highlight the abstract.
 >
@@ -218,11 +234,11 @@ After the model calls `display_pdf`, it receives the `viewUUID` and a descriptio
 
 > **User:** Give me the text of pages 1–3.
 >
-> _Model calls `interact` with action `get_pages`, intervals `[{start:1, end:3}]`, getText `true`_
+> _Model calls `interact` with action `get_text`, intervals `[{start:1, end:3}]`_
 
 > **User:** Take a screenshot of the first page.
 >
-> _Model calls `interact` with action `get_pages`, intervals `[{start:1, end:1}]`, getScreenshots `true`_
+> _Model calls `interact` with action `get_screenshot`, page `1`_
 
 ### Stamps & Form Filling
 
@@ -311,6 +327,7 @@ Supported annotation types (synced with PDF.js):
 | `line`          | `x1`, `y1`, `x2`, `y2`, `color?`            | `/Line`      |
 | `freetext`      | `x`, `y`, `content`, `fontSize?`, `color?`  | `/FreeText`  |
 | `stamp`         | `x`, `y`, `label`, `color?`, `rotation?`    | `/Stamp`     |
+| `image`         | `x`, `y`, `width`, `height`, `imageData?`/`imageUrl?`, `rotation?` | `/Stamp`     |
 
 ## Dependencies
 
