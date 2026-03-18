@@ -1551,7 +1551,9 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
       const contentParts: Array<{ type: "text"; text: string }> = [
         {
           type: "text",
-          text: `Displaying PDF: ${normalized} (viewUUID: ${uuid})`,
+          text: disableInteract
+            ? `Displaying PDF: ${normalized}`
+            : `Displaying PDF: ${normalized} (viewUUID: ${uuid})`,
         },
       ];
 

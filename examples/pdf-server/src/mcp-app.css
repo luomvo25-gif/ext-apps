@@ -861,8 +861,8 @@ body {
 
 /* Annotation Side Panel */
 .annotation-panel {
-  width: 250px;
-  min-width: 120px;
+  width: 500px;
+  min-width: 180px;
   max-width: 50vw;
   background: var(--bg000);
   border-left: 1px solid var(--bg200);
