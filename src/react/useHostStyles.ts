@@ -77,13 +77,18 @@ export function useHostStyleVariables(
       return;
     }
 
+    const prev = app.onhostcontextchanged;
     app.onhostcontextchanged = (params) => {
+      prev?.(params);
       if (params.theme) {
         applyDocumentTheme(params.theme);
       }
       if (params.styles?.variables) {
         applyHostStyleVariables(params.styles.variables);
       }
+    };
+    return () => {
+      app.onhostcontextchanged = prev;
     };
   }, [app]);
 }
@@ -145,10 +150,15 @@ export function useHostFonts(
       return;
     }
 
+    const prev = app.onhostcontextchanged;
     app.onhostcontextchanged = (params) => {
+      prev?.(params);
       if (params.styles?.css?.fonts) {
         applyHostFonts(params.styles.css.fonts);
       }
+    };
+    return () => {
+      app.onhostcontextchanged = prev;
     };
   }, [app]);
 }

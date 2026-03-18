@@ -197,8 +197,8 @@ type RequestHandlerExtra = Parameters<
  * - `ontoolcancelled` - Tool execution was cancelled by user or host
  * - `onhostcontextchanged` - Host context changes (theme, locale, etc.)
  *
- * These setters are convenience wrappers around `setNotificationHandler()`.
- * Both patterns work; use whichever fits your coding style better.
+ * These properties are readable, so you can chain onto an existing handler:
+ * `const prev = app.onfoo; app.onfoo = (p) => { prev?.(p); ... }`.
  *
  * @example Basic usage with PostMessageTransport
  * ```ts source="./app.examples.ts#App_basicUsage"
@@ -248,9 +248,27 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
       return {};
     });
 
-    // Set up default handler to update _hostContext when notifications arrive.
-    // Users can override this by setting onhostcontextchanged.
-    this.onhostcontextchanged = () => {};
+    // Register notification handlers once. The on* properties are plain fields,
+    // so reading the current handler and chaining is safe.
+    this.setNotificationHandler(McpUiToolInputNotificationSchema, (n) =>
+      this.ontoolinput?.(n.params),
+    );
+    this.setNotificationHandler(McpUiToolInputPartialNotificationSchema, (n) =>
+      this.ontoolinputpartial?.(n.params),
+    );
+    this.setNotificationHandler(McpUiToolResultNotificationSchema, (n) =>
+      this.ontoolresult?.(n.params),
+    );
+    this.setNotificationHandler(McpUiToolCancelledNotificationSchema, (n) =>
+      this.ontoolcancelled?.(n.params),
+    );
+    this.setNotificationHandler(
+      McpUiHostContextChangedNotificationSchema,
+      (n) => {
+        this._hostContext = { ...this._hostContext, ...n.params };
+        this.onhostcontextchanged?.(n.params);
+      },
+    );
   }
 
   /**
@@ -338,12 +356,11 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * sends a tool's complete arguments. This is sent after a tool call begins
    * and before the tool result is available.
    *
-   * This setter is a convenience wrapper around `setNotificationHandler()` that
-   * automatically handles the notification schema and extracts the params for you.
+   * The current handler is readable, so you can chain onto an existing one:
+   * `const prev = app.onfoo; app.onfoo = (p) => { prev?.(p); ... }`. Restoring
+   * `prev` undoes your registration if restores happen in reverse (LIFO) order.
    *
    * Register handlers before calling {@link connect `connect`} to avoid missing notifications.
-   *
-   * @param callback - Function called with the tool input params ({@link McpUiToolInputNotification.params `McpUiToolInputNotification.params`})
    *
    * @example
    * ```ts source="./app.examples.ts#App_ontoolinput_setter"
@@ -355,16 +372,9 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * await app.connect();
    * ```
    *
-   * @see {@link setNotificationHandler `setNotificationHandler`} for the underlying method
    * @see {@link McpUiToolInputNotification `McpUiToolInputNotification`} for the notification structure
    */
-  set ontoolinput(
-    callback: (params: McpUiToolInputNotification["params"]) => void,
-  ) {
-    this.setNotificationHandler(McpUiToolInputNotificationSchema, (n) =>
-      callback(n.params),
-    );
-  }
+  ontoolinput?: (params: McpUiToolInputNotification["params"]) => void;
 
   /**
    * Convenience handler for receiving streaming partial tool input from the host.
@@ -378,12 +388,11 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * (e.g., the last item in an array may be truncated). Use partial data only
    * for preview UI, not for critical operations.
    *
-   * This setter is a convenience wrapper around `setNotificationHandler()` that
-   * automatically handles the notification schema and extracts the params for you.
+   * The current handler is readable, so you can chain onto an existing one:
+   * `const prev = app.onfoo; app.onfoo = (p) => { prev?.(p); ... }`. Restoring
+   * `prev` undoes your registration if restores happen in reverse (LIFO) order.
    *
    * Register handlers before calling {@link connect `connect`} to avoid missing notifications.
-   *
-   * @param callback - Function called with each partial tool input update ({@link McpUiToolInputPartialNotification.params `McpUiToolInputPartialNotification.params`})
    *
    * @example Progressive rendering of tool arguments
    * ```ts source="./app.examples.ts#App_ontoolinputpartial_progressiveRendering"
@@ -403,17 +412,12 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * };
    * ```
    *
-   * @see {@link setNotificationHandler `setNotificationHandler`} for the underlying method
    * @see {@link McpUiToolInputPartialNotification `McpUiToolInputPartialNotification`} for the notification structure
    * @see {@link ontoolinput `ontoolinput`} for the complete tool input handler
    */
-  set ontoolinputpartial(
-    callback: (params: McpUiToolInputPartialNotification["params"]) => void,
-  ) {
-    this.setNotificationHandler(McpUiToolInputPartialNotificationSchema, (n) =>
-      callback(n.params),
-    );
-  }
+  ontoolinputpartial?: (
+    params: McpUiToolInputPartialNotification["params"],
+  ) => void;
 
   /**
    * Convenience handler for receiving tool execution results from the host.
@@ -422,12 +426,11 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * sends the result of a tool execution. This is sent after the tool completes
    * on the MCP server, allowing your app to display the results or update its state.
    *
-   * This setter is a convenience wrapper around `setNotificationHandler()` that
-   * automatically handles the notification schema and extracts the params for you.
+   * The current handler is readable, so you can chain onto an existing one:
+   * `const prev = app.onfoo; app.onfoo = (p) => { prev?.(p); ... }`. Restoring
+   * `prev` undoes your registration if restores happen in reverse (LIFO) order.
    *
    * Register handlers before calling {@link connect `connect`} to avoid missing notifications.
-   *
-   * @param callback - Function called with the tool result ({@link McpUiToolResultNotification.params `McpUiToolResultNotification.params`})
    *
    * @example Display tool execution results
    * ```ts source="./app.examples.ts#App_ontoolresult_displayResults"
@@ -440,17 +443,10 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * };
    * ```
    *
-   * @see {@link setNotificationHandler `setNotificationHandler`} for the underlying method
    * @see {@link McpUiToolResultNotification `McpUiToolResultNotification`} for the notification structure
    * @see {@link ontoolinput `ontoolinput`} for the initial tool input handler
    */
-  set ontoolresult(
-    callback: (params: McpUiToolResultNotification["params"]) => void,
-  ) {
-    this.setNotificationHandler(McpUiToolResultNotificationSchema, (n) =>
-      callback(n.params),
-    );
-  }
+  ontoolresult?: (params: McpUiToolResultNotification["params"]) => void;
 
   /**
    * Convenience handler for receiving tool cancellation notifications from the host.
@@ -460,12 +456,11 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * including user action, sampling error, classifier intervention, or other
    * interruptions. Apps should update their state and display appropriate feedback.
    *
-   * This setter is a convenience wrapper around `setNotificationHandler()` that
-   * automatically handles the notification schema and extracts the params for you.
+   * The current handler is readable, so you can chain onto an existing one:
+   * `const prev = app.onfoo; app.onfoo = (p) => { prev?.(p); ... }`. Restoring
+   * `prev` undoes your registration if restores happen in reverse (LIFO) order.
    *
    * Register handlers before calling {@link connect `connect`} to avoid missing notifications.
-   *
-   * @param callback - Function called when tool execution is cancelled. Receives optional cancellation reason — see {@link McpUiToolCancelledNotification.params `McpUiToolCancelledNotification.params`}.
    *
    * @example Handle tool cancellation
    * ```ts source="./app.examples.ts#App_ontoolcancelled_handleCancellation"
@@ -475,17 +470,10 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * };
    * ```
    *
-   * @see {@link setNotificationHandler `setNotificationHandler`} for the underlying method
    * @see {@link McpUiToolCancelledNotification `McpUiToolCancelledNotification`} for the notification structure
    * @see {@link ontoolresult `ontoolresult`} for successful tool completion
    */
-  set ontoolcancelled(
-    callback: (params: McpUiToolCancelledNotification["params"]) => void,
-  ) {
-    this.setNotificationHandler(McpUiToolCancelledNotificationSchema, (n) =>
-      callback(n.params),
-    );
-  }
+  ontoolcancelled?: (params: McpUiToolCancelledNotification["params"]) => void;
 
   /**
    * Convenience handler for host context changes (theme, locale, etc.).
@@ -495,16 +483,15 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * other environmental updates. Apps should respond by updating their UI
    * accordingly.
    *
-   * This setter is a convenience wrapper around `setNotificationHandler()` that
-   * automatically handles the notification schema and extracts the params for you.
+   * The current handler is readable, so you can chain onto an existing one:
+   * `const prev = app.onfoo; app.onfoo = (p) => { prev?.(p); ... }`. Restoring
+   * `prev` undoes your registration if restores happen in reverse (LIFO) order.
    *
    * Notification params are automatically merged into the internal host context
    * before the callback is invoked. This means {@link getHostContext `getHostContext`} will
    * return the updated values even before your callback runs.
    *
    * Register handlers before calling {@link connect `connect`} to avoid missing notifications.
-   *
-   * @param callback - Function called with the updated host context
    *
    * @example Respond to theme changes
    * ```ts source="./app.examples.ts#App_onhostcontextchanged_respondToTheme"
@@ -517,22 +504,12 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * };
    * ```
    *
-   * @see {@link setNotificationHandler `setNotificationHandler`} for the underlying method
    * @see {@link McpUiHostContextChangedNotification `McpUiHostContextChangedNotification`} for the notification structure
    * @see {@link McpUiHostContext `McpUiHostContext`} for the full context structure
    */
-  set onhostcontextchanged(
-    callback: (params: McpUiHostContextChangedNotification["params"]) => void,
-  ) {
-    this.setNotificationHandler(
-      McpUiHostContextChangedNotificationSchema,
-      (n) => {
-        // Merge the partial update into the stored context
-        this._hostContext = { ...this._hostContext, ...n.params };
-        callback(n.params);
-      },
-    );
-  }
+  onhostcontextchanged?: (
+    params: McpUiHostContextChangedNotification["params"],
+  ) => void;
 
   /**
    * Convenience handler for graceful shutdown requests from the host.

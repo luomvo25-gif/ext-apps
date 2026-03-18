@@ -230,6 +230,56 @@ describe("App <-> AppBridge integration", () => {
       expect(receivedContexts).toEqual([{ theme: "dark" }]);
     });
 
+    it("onhostcontextchanged getter returns the current handler for chaining", async () => {
+      expect(app.onhostcontextchanged).toBeUndefined();
+
+      const calls: string[] = [];
+      app.onhostcontextchanged = () => calls.push("a");
+      const prev = app.onhostcontextchanged;
+      app.onhostcontextchanged = (p) => {
+        prev?.(p);
+        calls.push("b");
+      };
+
+      await app.connect(appTransport);
+      bridge.setHostContext({ theme: "dark" });
+      await flush();
+
+      expect(calls).toEqual(["a", "b"]);
+      // Merge into _hostContext still runs independently of the callback chain
+      expect(app.getHostContext()?.theme).toBe("dark");
+    });
+
+    it("onhostcontextchanged chain unwinds cleanly when restored in LIFO order", async () => {
+      const calls: string[] = [];
+
+      const prev1 = app.onhostcontextchanged;
+      app.onhostcontextchanged = (p) => {
+        prev1?.(p);
+        calls.push("vars");
+      };
+      const prev2 = app.onhostcontextchanged;
+      app.onhostcontextchanged = (p) => {
+        prev2?.(p);
+        calls.push("fonts");
+      };
+
+      await app.connect(appTransport);
+      bridge.setHostContext({ theme: "dark" });
+      await flush();
+      expect(calls).toEqual(["vars", "fonts"]);
+
+      // Unwind: last chainer restores first
+      app.onhostcontextchanged = prev2;
+      calls.length = 0;
+      bridge.setHostContext({ theme: "light" });
+      await flush();
+      expect(calls).toEqual(["vars"]);
+
+      app.onhostcontextchanged = prev1;
+      expect(app.onhostcontextchanged).toBeUndefined();
+    });
+
     it("setHostContext only sends changed values", async () => {
       const receivedContexts: unknown[] = [];
       app.onhostcontextchanged = (params) => {
