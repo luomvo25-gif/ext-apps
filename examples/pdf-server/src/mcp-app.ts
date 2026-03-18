@@ -5441,11 +5441,42 @@ app.connect().then(() => {
         return { parseError: true, length: raw.length };
       }
     })(),
+    // PDF.js's own annotationStorage — where editor stamps live.
+    // Keys like "pdfjs_internal_editor_*" are PDF.js's built-in annotation
+    // editor; those are invisible to our annotationMap tracking.
+    pdfJsAnnotationStorage: (() => {
+      if (!pdfDocument) return null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const storage = pdfDocument.annotationStorage as any;
+      const all = storage.getAll?.() ?? storage._storage ?? new Map();
+      const entries =
+        all instanceof Map ? [...all.entries()] : Object.entries(all);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return entries.map(([k, v]: [string, any]) => ({
+        key: k,
+        ctor: v?.constructor?.name,
+        annotationType: v?.annotationType,
+        hasBitmap: Boolean(v?.bitmap),
+        value: v?.value,
+      }));
+    })(),
+    // All localStorage keys that look like ours — per-tool-call keys mean
+    // old sessions' annotations won't restore under the current key.
+    allPdfAnnotKeys: Object.keys(localStorage).filter(
+      (k) => k.includes("pdf-annot") || k.includes(":annotations"),
+    ),
     currentPage,
     isDirty,
     panelOpen: annotationPanelOpen,
   };
   console.log(JSON.stringify(out, null, 2));
+  // Also expose internals on window for interactive poking
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const w = window as any;
+  w.__pdf = { pdfDocument, annotationMap, annotationLayerEl, formLayerEl };
+  console.log(
+    "→ internals exposed as window.__pdf.{pdfDocument, annotationMap, ...}",
+  );
   return out;
 };
 
