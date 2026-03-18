@@ -16,6 +16,7 @@ import {
   stopFileWatch,
   cliLocalFiles,
   isWritablePath,
+  writeFlags,
   CACHE_INACTIVITY_TIMEOUT_MS,
   CACHE_MAX_LIFETIME_MS,
   CACHE_MAX_PDF_SIZE_BYTES,
@@ -459,6 +460,7 @@ describe("isWritablePath", () => {
   let savedFiles: Set<string>;
   let savedDirs: Set<string>;
   let savedCli: Set<string>;
+  let savedAllowUploadsRoot: boolean;
 
   beforeEach(() => {
     savedFiles = new Set(allowedLocalFiles);
@@ -467,6 +469,8 @@ describe("isWritablePath", () => {
     allowedLocalFiles.clear();
     allowedLocalDirs.clear();
     cliLocalFiles.clear();
+    savedAllowUploadsRoot = writeFlags.allowUploadsRoot;
+    writeFlags.allowUploadsRoot = false;
   });
 
   afterEach(() => {
@@ -476,6 +480,7 @@ describe("isWritablePath", () => {
     for (const x of savedFiles) allowedLocalFiles.add(x);
     for (const x of savedDirs) allowedLocalDirs.add(x);
     for (const x of savedCli) cliLocalFiles.add(x);
+    writeFlags.allowUploadsRoot = savedAllowUploadsRoot;
   });
 
   it("nothing is writable when no roots and no CLI files", () => {
@@ -525,6 +530,43 @@ describe("isWritablePath", () => {
     allowedLocalDirs.add("/home/user/docs");
     expect(isWritablePath("/home/user/other/file.pdf")).toBe(false);
     expect(isWritablePath("/home/user/docsevil/file.pdf")).toBe(false);
+  });
+
+  it("dir root named 'uploads' is read-only by default", () => {
+    // Claude Desktop mounts the conversation's attachment drop folder as a
+    // directory root literally named 'uploads'. The attached PDF lives
+    // directly under it.
+    allowedLocalDirs.add("/var/folders/xy/T/claude/uploads");
+    expect(isWritablePath("/var/folders/xy/T/claude/uploads/Form.pdf")).toBe(
+      false,
+    );
+    // Deep nesting under the uploads root — still the same root, still no.
+    expect(
+      isWritablePath("/var/folders/xy/T/claude/uploads/sub/deep.pdf"),
+    ).toBe(false);
+  });
+
+  it("uploads-root guard matches basename, not substring", () => {
+    allowedLocalDirs.add("/home/user/my-uploads"); // contains 'uploads' but ≠
+    allowedLocalDirs.add("/home/user/uploads-archive");
+    expect(isWritablePath("/home/user/my-uploads/f.pdf")).toBe(true);
+    expect(isWritablePath("/home/user/uploads-archive/f.pdf")).toBe(true);
+  });
+
+  it("--writeable-uploads-root opts back in", () => {
+    allowedLocalDirs.add("/var/folders/xy/T/claude/uploads");
+    writeFlags.allowUploadsRoot = true;
+    expect(isWritablePath("/var/folders/xy/T/claude/uploads/Form.pdf")).toBe(
+      true,
+    );
+  });
+
+  it("CLI file under an uploads root is still writable", () => {
+    // Explicit CLI intent beats the uploads-basename heuristic.
+    allowedLocalDirs.add("/tmp/uploads");
+    allowedLocalFiles.add("/tmp/uploads/explicit.pdf");
+    cliLocalFiles.add("/tmp/uploads/explicit.pdf");
+    expect(isWritablePath("/tmp/uploads/explicit.pdf")).toBe(true);
   });
 });
 

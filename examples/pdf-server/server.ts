@@ -95,6 +95,21 @@ export const allowedLocalDirs = new Set<string>();
 export const cliLocalFiles = new Set<string>();
 
 /**
+ * Write-permission flags. Object wrapper (not a bare `let`) so main.ts can
+ * mutate via the exported binding without re-import gymnastics — same
+ * pattern as the Sets above.
+ */
+export const writeFlags = {
+  /**
+   * Claude Desktop mounts its per-conversation drop folder as a directory
+   * root whose basename is literally `uploads`. Files in there are one-shot
+   * copies the client doesn't expect us to overwrite. Default: read-only.
+   * `--writeable-uploads-root` flips this for local testing.
+   */
+  allowUploadsRoot: false,
+};
+
+/**
  * Saving is allowed iff:
  *   (a) the file was passed as a CLI arg — the user explicitly named it
  *       when starting the server, so overwriting is clearly intentional; OR
@@ -105,13 +120,24 @@ export const cliLocalFiles = new Set<string>();
  *       treat that signal as authoritative even when the path happens
  *       to fall inside a mounted directory.
  *
+ *   EXCEPTION to (b): a dir root whose basename is `uploads` is treated
+ *   as read-only unless `writeFlags.allowUploadsRoot` is set. This is how
+ *   Claude Desktop surfaces attached files — writing back to them
+ *   surprises the user (the attachment doesn't update).
+ *
  * With no directory roots and no CLI files, nothing is writable.
  */
 export function isWritablePath(resolved: string): boolean {
   if (cliLocalFiles.has(resolved)) return true;
   // MCP file root → always read-only, regardless of ancestry
   if (allowedLocalFiles.has(resolved)) return false;
-  return [...allowedLocalDirs].some((dir) => isAncestorDir(dir, resolved));
+  return [...allowedLocalDirs].some((dir) => {
+    if (!isAncestorDir(dir, resolved)) return false;
+    if (!writeFlags.allowUploadsRoot && path.basename(dir) === "uploads") {
+      return false;
+    }
+    return true;
+  });
 }
 
 // Works both from source (server.ts) and compiled (dist/server.js)
@@ -1158,10 +1184,17 @@ export interface CreateServerOptions {
    * @default false
    */
   useClientRoots?: boolean;
+
+  /**
+   * Emit debug metadata to the viewer (currently: allowed roots shown
+   * in a floating bubble). Toggled by the `--debug` CLI flag.
+   */
+  debug?: boolean;
 }
 
 export function createServer(options: CreateServerOptions = {}): McpServer {
   const { enableInteract = false, useClientRoots = false } = options;
+  const debug = options.debug ?? false;
   const disableInteract = !enableInteract;
   const server = new McpServer({ name: "PDF Server", version: "2.0.0" });
 
@@ -1432,11 +1465,13 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
       // Check writability (governs save button; see isWritablePath doc).
       // Also requires OS-level W_OK so we don't lie on read-only mounts.
       let writable = false;
+      let debugResolved: string | undefined; // only used when --debug
       if (isFileUrl(normalized) || isLocalPath(normalized)) {
         const localPath = isFileUrl(normalized)
           ? fileUrlToPath(normalized)
           : decodeURIComponent(normalized);
         const resolved = path.resolve(localPath);
+        debugResolved = resolved;
         if (isWritablePath(resolved)) {
           try {
             await fs.promises.access(resolved, fs.constants.W_OK);
@@ -1595,6 +1630,21 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
           viewUUID: uuid,
           interactEnabled: !disableInteract,
           writable,
+          // Debug: viewer renders this in a floating bubble (--debug flag).
+          ...(debug
+            ? {
+                _debug: {
+                  resolved: debugResolved,
+                  writable,
+                  isWritablePath: debugResolved
+                    ? isWritablePath(debugResolved)
+                    : undefined,
+                  cliLocalFiles: [...cliLocalFiles],
+                  allowedLocalFiles: [...allowedLocalFiles],
+                  allowedLocalDirs: [...allowedLocalDirs],
+                },
+              }
+            : {}),
         },
       };
     },
