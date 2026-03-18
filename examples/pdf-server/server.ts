@@ -160,154 +160,13 @@ const POLL_BATCH_WAIT_MS = 200;
 const LONG_POLL_TIMEOUT_MS = 30_000; // Max time to hold a long-poll request open
 
 // =============================================================================
-// Annotation Types
+// Interact Tool Input Schemas (runtime validators)
 // =============================================================================
-
-/** Rectangle in coordinate space (top-left origin for model-facing API, in PDF points) */
-const RectSchema = z.object({
-  x: z.number(),
-  y: z.number(),
-  width: z.number(),
-  height: z.number(),
-});
-
-/** Any text is valid. Common labels: APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED. */
-const StampLabel = z
-  .string()
-  .describe(
-    "Stamp label text (e.g. APPROVED, DRAFT, CONFIDENTIAL, FINAL, VOID, REJECTED, or any custom text)",
-  );
-
-const AnnotationBase = z.object({
-  id: z.string(),
-  page: z.number().min(1),
-});
-
-const HighlightAnnotation = AnnotationBase.extend({
-  type: z.literal("highlight"),
-  rects: z.array(RectSchema).min(1),
-  color: z.string().optional(),
-  content: z.string().optional(),
-});
-
-const UnderlineAnnotation = AnnotationBase.extend({
-  type: z.literal("underline"),
-  rects: z.array(RectSchema).min(1),
-  color: z.string().optional(),
-});
-
-const StrikethroughAnnotation = AnnotationBase.extend({
-  type: z.literal("strikethrough"),
-  rects: z.array(RectSchema).min(1),
-  color: z.string().optional(),
-});
-
-const NoteAnnotation = AnnotationBase.extend({
-  type: z.literal("note"),
-  x: z.number(),
-  y: z.number(),
-  content: z.string(),
-  color: z.string().optional(),
-});
-
-const RectangleAnnotation = AnnotationBase.extend({
-  type: z.literal("rectangle"),
-  x: z.number(),
-  y: z.number(),
-  width: z.number(),
-  height: z.number(),
-  color: z.string().optional(),
-  fillColor: z.string().optional(),
-  rotation: z.number().optional(),
-});
-
-const CircleAnnotation = AnnotationBase.extend({
-  type: z.literal("circle"),
-  x: z.number(),
-  y: z.number(),
-  width: z.number(),
-  height: z.number(),
-  color: z.string().optional(),
-  fillColor: z.string().optional(),
-});
-
-const LineAnnotation = AnnotationBase.extend({
-  type: z.literal("line"),
-  x1: z.number(),
-  y1: z.number(),
-  x2: z.number(),
-  y2: z.number(),
-  color: z.string().optional(),
-});
-
-const FreetextAnnotation = AnnotationBase.extend({
-  type: z.literal("freetext"),
-  x: z.number(),
-  y: z.number(),
-  content: z.string(),
-  fontSize: z.number().optional(),
-  color: z.string().optional(),
-});
-
-const StampAnnotation = AnnotationBase.extend({
-  type: z.literal("stamp"),
-  x: z.number(),
-  y: z.number(),
-  label: StampLabel,
-  color: z.string().optional(),
-  rotation: z.number().optional(),
-});
-
-const ImageAnnotation = AnnotationBase.extend({
-  type: z.literal("image"),
-  x: z.number().optional(),
-  y: z.number().optional(),
-  width: z.number().optional(),
-  height: z.number().optional(),
-  imageUrl: z
-    .string()
-    .describe(
-      "File path or HTTPS URL to a PNG/JPEG image (e.g. signature, logo). NO data: URIs. The user can also drag & drop images directly onto the viewer.",
-    ),
-  mimeType: z
-    .string()
-    .optional()
-    .describe("image/png or image/jpeg (auto-detected if omitted)"),
-  rotation: z.number().optional(),
-  aspect: z
-    .enum(["preserve", "ignore"])
-    .optional()
-    .describe(
-      'Aspect ratio behavior on resize: "preserve" (default) keeps proportions, "ignore" allows free resize',
-    ),
-});
-
-const PdfAnnotationDef = z.discriminatedUnion("type", [
-  HighlightAnnotation,
-  UnderlineAnnotation,
-  StrikethroughAnnotation,
-  NoteAnnotation,
-  RectangleAnnotation,
-  CircleAnnotation,
-  LineAnnotation,
-  FreetextAnnotation,
-  StampAnnotation,
-  ImageAnnotation,
-]);
-
-/** Partial annotation update — id + type required, rest optional */
-const PdfAnnotationUpdate = z.union([
-  HighlightAnnotation.partial().required({ id: true, type: true }),
-  UnderlineAnnotation.partial().required({ id: true, type: true }),
-  StrikethroughAnnotation.partial().required({ id: true, type: true }),
-  NoteAnnotation.partial().required({ id: true, type: true }),
-  RectangleAnnotation.partial().required({ id: true, type: true }),
-  FreetextAnnotation.partial().required({ id: true, type: true }),
-  StampAnnotation.partial().required({ id: true, type: true }),
-  CircleAnnotation.partial().required({ id: true, type: true }),
-  LineAnnotation.partial().required({ id: true, type: true }),
-  ImageAnnotation.partial().required({ id: true, type: true }),
-]);
+//
+// Annotation structure docs live in src/pdf-annotations.ts (the TS
+// interfaces) and in the interact tool description. The inputSchema
+// for `annotations` accepts z.record(z.any()) to keep the model-facing
+// API forgiving; adding strict validation here would be a behavior change.
 
 const FormField = z.object({
   name: z.string(),
@@ -320,44 +179,14 @@ const PageInterval = z.object({
 });
 
 // =============================================================================
-// Command Queue (shared across stateless server instances)
+// Command Queue — wire protocol shared with the viewer
 // =============================================================================
 
-export type PdfCommand =
-  | { type: "navigate"; page: number }
-  | { type: "search"; query: string }
-  | { type: "find"; query: string }
-  | { type: "search_navigate"; matchIndex: number }
-  | { type: "zoom"; scale: number }
-  | {
-      type: "add_annotations";
-      annotations: z.infer<typeof PdfAnnotationDef>[];
-    }
-  | {
-      type: "update_annotations";
-      annotations: z.infer<typeof PdfAnnotationUpdate>[];
-    }
-  | { type: "remove_annotations"; ids: string[] }
-  | {
-      type: "highlight_text";
-      id: string;
-      query: string;
-      page?: number;
-      color?: string;
-      content?: string;
-    }
-  | {
-      type: "fill_form";
-      fields: z.infer<typeof FormField>[];
-    }
-  | {
-      type: "get_pages";
-      requestId: string;
-      intervals: Array<{ start?: number; end?: number }>;
-      getText: boolean;
-      getScreenshots: boolean;
-    }
-  | { type: "file_changed"; mtimeMs: number };
+// PdfCommand is the single source of truth for what flows through the
+// poll queue. Defined once in src/commands.ts; both sides import it.
+// (`import type` → no pdf-lib bundled into the server.)
+import type { PdfCommand } from "./src/commands.js";
+export type { PdfCommand };
 
 // =============================================================================
 // Pending get_pages Requests (request-response bridge via client)
@@ -1920,7 +1749,13 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
           }
           enqueueCommand(uuid, {
             type: "add_annotations",
-            annotations: annotations as z.infer<typeof PdfAnnotationDef>[],
+            // resolveImageAnnotation populates optional x/y/width/height;
+            // input is validated as Record<string,any>[] so this cast is
+            // the wire-protocol promise, not a compiler guarantee.
+            annotations: annotations as Extract<
+              PdfCommand,
+              { type: "add_annotations" }
+            >["annotations"],
           });
           description = `add ${annotations.length} annotation(s)`;
           break;
@@ -1937,7 +1772,10 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
             };
           enqueueCommand(uuid, {
             type: "update_annotations",
-            annotations: annotations as z.infer<typeof PdfAnnotationUpdate>[],
+            annotations: annotations as Extract<
+              PdfCommand,
+              { type: "update_annotations" }
+            >["annotations"],
           });
           description = `update ${annotations.length} annotation(s)`;
           break;

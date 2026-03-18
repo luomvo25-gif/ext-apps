@@ -5033,40 +5033,10 @@ app.onerror = (err: unknown) => {
 // Command Queue Polling
 // =============================================================================
 
-type PdfCommand =
-  | { type: "navigate"; page: number }
-  | { type: "search"; query: string }
-  | { type: "find"; query: string }
-  | { type: "search_navigate"; matchIndex: number }
-  | { type: "zoom"; scale: number }
-  | { type: "add_annotations"; annotations: PdfAnnotationDef[] }
-  | {
-      type: "update_annotations";
-      annotations: Array<
-        Partial<PdfAnnotationDef> & { id: string; type: string }
-      >;
-    }
-  | { type: "remove_annotations"; ids: string[] }
-  | {
-      type: "highlight_text";
-      id: string;
-      query: string;
-      page?: number;
-      color?: string;
-      content?: string;
-    }
-  | {
-      type: "fill_form";
-      fields: Array<{ name: string; value: string | boolean }>;
-    }
-  | {
-      type: "get_pages";
-      requestId: string;
-      intervals: Array<{ start?: number; end?: number }>;
-      getText: boolean;
-      getScreenshots: boolean;
-    }
-  | { type: "file_changed"; mtimeMs: number };
+// PdfCommand is the wire protocol between server and viewer.
+// Single source of truth in ./commands.ts — adding a new command
+// variant there forces a matching `case` below.
+import type { PdfCommand } from "./commands.js";
 
 /** Get page height in PDF points (for coordinate conversion). */
 async function getPageHeight(pageNum: number): Promise<number> {
