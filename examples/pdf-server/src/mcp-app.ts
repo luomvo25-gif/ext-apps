@@ -3729,6 +3729,14 @@ async function savePdf(): Promise<void> {
       const sc = result.structuredContent as { mtimeMs?: number } | undefined;
       lastSavedMtime = sc?.mtimeMs ?? null;
 
+      // Rebase: the file on disk now contains our annotations + form values.
+      // Update the baseline so future diffs are relative to what was saved.
+      pdfBaselineAnnotations = [...annotationMap.values()].map((t) => ({
+        ...t.def,
+      }));
+      pdfBaselineFormValues.clear();
+      for (const [k, v] of formFieldValues) pdfBaselineFormValues.set(k, v);
+
       setDirty(false); // → updateSaveBtn() disables button
       const key = annotationStorageKey();
       if (key) {
