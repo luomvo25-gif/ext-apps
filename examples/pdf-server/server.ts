@@ -262,25 +262,38 @@ interface ViewFileWatch {
 }
 const viewFileWatches = new Map<string, ViewFileWatch>();
 
+/**
+ * Per-view heartbeat. THIS is what the sweep iterates — not commandQueues.
+ *
+ * Why not commandQueues: display_pdf populates viewFieldNames/viewFieldInfo/
+ * viewFileWatches but never touches commandQueues (only enqueueCommand does,
+ * and it's triply gated). And dequeueCommands deletes the entry on every poll,
+ * so even when it exists the sweep's TTL window is ~200ms wide. Net effect:
+ * the sweep found nothing and the aux maps leaked every display_pdf call.
+ * viewFileWatches entries hold an fs.StatWatcher (FD + timer) — slow FD
+ * exhaustion on HTTP --enable-interact.
+ */
+const viewLastActivity = new Map<string, number>();
+
+/** Register or refresh the heartbeat for a view. */
+function touchView(uuid: string): void {
+  viewLastActivity.set(uuid, Date.now());
+}
+
 function pruneStaleQueues(): void {
   const now = Date.now();
-  for (const [uuid, entry] of commandQueues) {
-    if (now - entry.lastActivity > COMMAND_TTL_MS) {
+  for (const [uuid, lastActivity] of viewLastActivity) {
+    if (now - lastActivity > COMMAND_TTL_MS) {
+      viewLastActivity.delete(uuid);
       commandQueues.delete(uuid);
       viewFieldNames.delete(uuid);
       viewFieldInfo.delete(uuid);
       stopFileWatch(uuid);
     }
   }
-  // Clean up empty queues with no active pollers
-  for (const [uuid, entry] of commandQueues) {
-    if (entry.commands.length === 0 && !pollWaiters.has(uuid)) {
-      commandQueues.delete(uuid);
-    }
-  }
 }
 
-// Periodic sweep so abandoned queues don't leak
+// Periodic sweep so abandoned views don't leak
 setInterval(pruneStaleQueues, SWEEP_INTERVAL_MS).unref();
 
 function enqueueCommand(viewUUID: string, command: PdfCommand): void {
@@ -291,6 +304,7 @@ function enqueueCommand(viewUUID: string, command: PdfCommand): void {
   }
   entry.commands.push(command);
   entry.lastActivity = Date.now();
+  touchView(viewUUID);
 
   // Wake up any long-polling request waiting for this viewUUID
   const waiter = pollWaiters.get(viewUUID);
@@ -301,6 +315,9 @@ function enqueueCommand(viewUUID: string, command: PdfCommand): void {
 }
 
 function dequeueCommands(viewUUID: string): PdfCommand[] {
+  // Poll is activity — keep the view alive even when the queue is empty
+  // (the common case: viewer polls every ~30s with nothing to receive).
+  touchView(viewUUID);
   const entry = commandQueues.get(viewUUID);
   if (!entry) return [];
   const commands = entry.commands;
@@ -1290,6 +1307,9 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
       // Probe file size so the client can set up range transport without an extra fetch
       const { totalBytes } = await readPdfRange(normalized, 0, 1);
       const uuid = randomUUID();
+      // Start the heartbeat now so the sweep can clean up viewFieldNames/
+      // viewFieldInfo/viewFileWatches even if no interact calls ever happen.
+      if (!disableInteract) touchView(uuid);
 
       // Check writability (governs save button; see isWritablePath doc).
       // Also requires OS-level W_OK so we don't lie on read-only mounts.

@@ -400,6 +400,9 @@ export function getFormFieldLabel(name: string): string {
 function getAnnotationY(def: PdfAnnotationDef): number {
   if ("y" in def && typeof def.y === "number") return def.y;
   if ("rects" in def && def.rects.length > 0) return def.rects[0].y;
+  // LineAnnotation has only x1/y1/x2/y2 — sort by the higher endpoint
+  // (higher internal-y = closer to page top).
+  if ("y1" in def) return Math.max(def.y1, def.y2);
   return 0;
 }
 
