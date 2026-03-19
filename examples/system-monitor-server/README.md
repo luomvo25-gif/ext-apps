@@ -4,9 +4,9 @@ A demo MCP App that displays real-time OS metrics with a stacked area chart for 
 
 <table>
   <tr>
-    <td><a href="https://modelcontextprotocol.github.io/ext-apps/screenshots/system-monitor-server/01-initial-state.png"><img src="https://modelcontextprotocol.github.io/ext-apps/screenshots/system-monitor-server/01-initial-state.png" alt="Initial state" width="100%"></a></td>
-    <td><a href="https://modelcontextprotocol.github.io/ext-apps/screenshots/system-monitor-server/02-cpu-data-accumulated.png"><img src="https://modelcontextprotocol.github.io/ext-apps/screenshots/system-monitor-server/02-cpu-data-accumulated.png" alt="CPU data accumulated" width="100%"></a></td>
-    <td><a href="https://modelcontextprotocol.github.io/ext-apps/screenshots/system-monitor-server/03-extended-cpu-history.png"><img src="https://modelcontextprotocol.github.io/ext-apps/screenshots/system-monitor-server/03-extended-cpu-history.png" alt="Extended CPU history" width="100%"></a></td>
+    <td><a href="https://apps.extensions.modelcontextprotocol.io/screenshots/system-monitor-server/01-initial-state.png"><img src="https://apps.extensions.modelcontextprotocol.io/screenshots/system-monitor-server/01-initial-state.png" alt="Initial state" width="100%"></a></td>
+    <td><a href="https://apps.extensions.modelcontextprotocol.io/screenshots/system-monitor-server/02-cpu-data-accumulated.png"><img src="https://apps.extensions.modelcontextprotocol.io/screenshots/system-monitor-server/02-cpu-data-accumulated.png" alt="CPU data accumulated" width="100%"></a></td>
+    <td><a href="https://apps.extensions.modelcontextprotocol.io/screenshots/system-monitor-server/03-extended-cpu-history.png"><img src="https://apps.extensions.modelcontextprotocol.io/screenshots/system-monitor-server/03-extended-cpu-history.png" alt="Extended CPU history" width="100%"></a></td>
   </tr>
 </table>
 

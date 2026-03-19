@@ -1,5 +1,7 @@
 ---
 title: Patterns
+group: Getting Started
+description: Common patterns and recipes for building MCP Apps — polling, chunked data, binary resources, theming, fullscreen, model context, state persistence, and more.
 ---
 
 # MCP Apps Patterns
@@ -295,6 +297,10 @@ videoEl.src = `data:${content.mimeType!};base64,${content.blob}`;
 
 > [!NOTE]
 > For a full example that implements this pattern, see: [`examples/video-resource-server/`](https://github.com/modelcontextprotocol/ext-apps/tree/main/examples/video-resource-server).
+
+## Configuring CSP and CORS
+
+See the dedicated [CSP & CORS](./csp-cors.md) guide in the Security section.
 
 ## Adapting to host context (theme, styling, fonts, and safe areas)
 

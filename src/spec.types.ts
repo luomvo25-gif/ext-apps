@@ -13,8 +13,10 @@
 import type {
   CallToolResult,
   ContentBlock,
+  EmbeddedResource,
   Implementation,
   RequestId,
+  ResourceLink,
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 
@@ -62,7 +64,6 @@ export type McpUiStyleVariableKey =
   | "--color-text-success"
   | "--color-text-warning"
   | "--color-text-disabled"
-  | "--color-text-ghost"
   // Border colors
   | "--color-border-primary"
   | "--color-border-secondary"
@@ -160,6 +161,38 @@ export interface McpUiOpenLinkRequest {
  */
 export interface McpUiOpenLinkResult {
   /** @description True if the host failed to open the URL (e.g., due to security policy). */
+  isError?: boolean;
+  /**
+   * Index signature required for MCP SDK `Protocol` class compatibility.
+   * Note: The generated schema uses passthrough() to allow additional properties.
+   */
+  [key: string]: unknown;
+}
+
+/**
+ * @description Request to download a file through the host.
+ *
+ * Sent from the View to the Host when the app wants to trigger a file download.
+ * Since MCP Apps run in sandboxed iframes where direct downloads are blocked,
+ * this provides a host-mediated mechanism for file exports.
+ * The host SHOULD show a confirmation dialog before initiating the download.
+ *
+ * @see {@link app!App.downloadFile `App.downloadFile`} for the method that sends this request
+ */
+export interface McpUiDownloadFileRequest {
+  method: "ui/download-file";
+  params: {
+    /** @description Resource contents to download — embedded (inline data) or linked (host fetches). Uses standard MCP resource types. */
+    contents: (EmbeddedResource | ResourceLink)[];
+  };
+}
+
+/**
+ * @description Result from a file download request.
+ * @see {@link McpUiDownloadFileRequest `McpUiDownloadFileRequest`}
+ */
+export interface McpUiDownloadFileResult {
+  /** @description True if the download failed (e.g., user cancelled or host denied). */
   isError?: boolean;
   /**
    * Index signature required for MCP SDK `Protocol` class compatibility.
@@ -450,6 +483,8 @@ export interface McpUiHostCapabilities {
   experimental?: {};
   /** @description Host supports opening external URLs. */
   openLinks?: {};
+  /** @description Host supports file downloads via ui/download-file. */
+  downloadFile?: {};
   /** @description Host can proxy tool calls to the MCP server. */
   serverTools?: {
     /** @description Host supports tools/list_changed notifications. */
@@ -538,31 +573,97 @@ export interface McpUiInitializedNotification {
 
 /**
  * @description Content Security Policy configuration for UI resources.
+ *
+ * Servers declare which origins their UI requires. Hosts use this to enforce appropriate CSP headers.
+ *
+ * > [!IMPORTANT]
+ * > MCP App HTML runs in a sandboxed iframe with no same-origin server.
+ * > **All** origins must be declared—including where your bundled JS/CSS is
+ * > served from (`localhost` in dev, your CDN in production).
  */
 export interface McpUiResourceCsp {
-  /** @description Origins for network requests (fetch/XHR/WebSocket). */
+  /**
+   * @description Origins for network requests (fetch/XHR/WebSocket).
+   *
+   * - Maps to CSP `connect-src` directive
+   * - Empty or omitted → no network connections (secure default)
+   *
+   * @example
+   * ```ts
+   * ["https://api.weather.com", "wss://realtime.service.com"]
+   * ```
+   */
   connectDomains?: string[];
-  /** @description Origins for static resources (scripts, images, styles, fonts). */
+  /**
+   * @description Origins for static resources (images, scripts, stylesheets, fonts, media).
+   *
+   * - Maps to CSP `img-src`, `script-src`, `style-src`, `font-src`, `media-src` directives
+   * - Wildcard subdomains supported: `https://*.example.com`
+   * - Empty or omitted → no network resources (secure default)
+   *
+   * @example
+   * ```ts
+   * ["https://cdn.jsdelivr.net", "https://*.cloudflare.com"]
+   * ```
+   */
   resourceDomains?: string[];
-  /** @description Origins for nested iframes (frame-src directive). */
+  /**
+   * @description Origins for nested iframes.
+   *
+   * - Maps to CSP `frame-src` directive
+   * - Empty or omitted → no nested iframes allowed (`frame-src 'none'`)
+   *
+   * @example
+   * ```ts
+   * ["https://www.youtube.com", "https://player.vimeo.com"]
+   * ```
+   */
   frameDomains?: string[];
-  /** @description Allowed base URIs for the document (base-uri directive). */
+  /**
+   * @description Allowed base URIs for the document.
+   *
+   * - Maps to CSP `base-uri` directive
+   * - Empty or omitted → only same origin allowed (`base-uri 'self'`)
+   *
+   * @example
+   * ```ts
+   * ["https://cdn.example.com"]
+   * ```
+   */
   baseUriDomains?: string[];
 }
 
 /**
  * @description Sandbox permissions requested by the UI resource.
+ *
+ * Servers declare which browser capabilities their UI needs.
  * Hosts MAY honor these by setting appropriate iframe `allow` attributes.
  * Apps SHOULD NOT assume permissions are granted; use JS feature detection as fallback.
  */
 export interface McpUiResourcePermissions {
-  /** @description Request camera access (Permission Policy `camera` feature). */
+  /**
+   * @description Request camera access.
+   *
+   * Maps to Permission Policy `camera` feature.
+   */
   camera?: {};
-  /** @description Request microphone access (Permission Policy `microphone` feature). */
+  /**
+   * @description Request microphone access.
+   *
+   * Maps to Permission Policy `microphone` feature.
+   */
   microphone?: {};
-  /** @description Request geolocation access (Permission Policy `geolocation` feature). */
+  /**
+   * @description Request geolocation access.
+   *
+   * Maps to Permission Policy `geolocation` feature.
+   */
   geolocation?: {};
-  /** @description Request clipboard write access (Permission Policy `clipboard-write` feature). */
+  /**
+   * @description Request clipboard write access.
+   *
+   * Maps to Permission Policy `clipboard-write` feature.
+   */
   clipboardWrite?: {};
 }
 
@@ -570,13 +671,41 @@ export interface McpUiResourcePermissions {
  * @description UI Resource metadata for security and rendering configuration.
  */
 export interface McpUiResourceMeta {
-  /** @description Content Security Policy configuration. */
+  /** @description Content Security Policy configuration for UI resources. */
   csp?: McpUiResourceCsp;
-  /** @description Sandbox permissions requested by the UI. */
+  /** @description Sandbox permissions requested by the UI resource. */
   permissions?: McpUiResourcePermissions;
-  /** @description Dedicated origin for view sandbox. */
+  /**
+   * @description Dedicated origin for view sandbox.
+   *
+   * Useful when views need stable, dedicated origins for OAuth callbacks, CORS policies, or API key allowlists.
+   *
+   * **Host-dependent:** The format and validation rules for this field are determined by each host. Servers MUST consult host-specific documentation for the expected domain format. Common patterns include:
+   * - Hash-based subdomains (e.g., `{hash}.claudemcpcontent.com`)
+   * - URL-derived subdomains (e.g., `www-example-com.oaiusercontent.com`)
+   *
+   * If omitted, host uses default sandbox origin (typically per-conversation).
+   *
+   * @example
+   * ```ts
+   * "a904794854a047f6.claudemcpcontent.com"
+   * ```
+   *
+   * @example
+   * ```ts
+   * "www-example-com.oaiusercontent.com"
+   * ```
+   */
   domain?: string;
-  /** @description Visual boundary preference - true if UI prefers a visible border. */
+  /**
+   * @description Visual boundary preference - true if view prefers a visible border.
+   *
+   * Boolean requesting whether a visible border and background is provided by the host. Specifying an explicit value for this is recommended because hosts' defaults may vary.
+   *
+   * - `true`: request visible border + background
+   * - `false`: request no visible border + background
+   * - omitted: host decides border
+   */
   prefersBorder?: boolean;
 }
 
@@ -621,7 +750,10 @@ export interface McpUiToolMeta {
    * URI of the UI resource to display for this tool, if any.
    * This is converted to `_meta["ui/resourceUri"]`.
    *
-   * @example "ui://weather/view.html"
+   * @example
+   * ```ts
+   * "ui://weather/view.html"
+   * ```
    */
   resourceUri?: string;
   /**
@@ -649,6 +781,8 @@ export interface McpUiToolMeta {
  * ```
  */
 export const OPEN_LINK_METHOD: McpUiOpenLinkRequest["method"] = "ui/open-link";
+export const DOWNLOAD_FILE_METHOD: McpUiDownloadFileRequest["method"] =
+  "ui/download-file";
 export const MESSAGE_METHOD: McpUiMessageRequest["method"] = "ui/message";
 export const SANDBOX_PROXY_READY_METHOD: McpUiSandboxProxyReadyNotification["method"] =
   "ui/notifications/sandbox-proxy-ready";

@@ -2,7 +2,7 @@ import { RESOURCE_MIME_TYPE, getToolUiResourceUri, type McpUiSandboxProxyReadyNo
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Resource, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { getTheme, onThemeChange } from "./theme";
 import { HOST_STYLE_VARIABLES } from "./host-styles";
 
@@ -22,6 +22,7 @@ export interface ServerInfo {
   name: string;
   client: Client;
   tools: Map<string, Tool>;
+  resources: Map<string, Resource>;
   appHtmlCache: Map<string, string>;
 }
 
@@ -36,7 +37,12 @@ export async function connectToServer(serverUrl: URL): Promise<ServerInfo> {
   const tools = new Map(toolsList.tools.map((tool) => [tool.name, tool]));
   log.info("Server tools:", Array.from(tools.keys()));
 
-  return { name, client, tools, appHtmlCache: new Map() };
+  // Fetch resources for listing-level _meta.ui (fallback for content-level)
+  const resourcesList = await client.listResources();
+  const resources = new Map(resourcesList.resources.map((r) => [r.uri, r]));
+  log.info("Server resources:", Array.from(resources.keys()));
+
+  return { name, client, tools, resources, appHtmlCache: new Map() };
 }
 
 async function connectWithFallback(serverUrl: URL): Promise<Client> {
@@ -128,14 +134,23 @@ async function getUiResource(serverInfo: ServerInfo, uri: string): Promise<UiRes
 
   const html = "blob" in content ? atob(content.blob) : content.text;
 
-  // Extract CSP and permissions metadata from resource content._meta.ui (or content.meta for Python SDK)
+  // Extract CSP and permissions metadata, preferring content-level (resources/read)
+  // and falling back to listing-level (resources/list) per the spec
   log.info("Resource content keys:", Object.keys(content));
   log.info("Resource content._meta:", (content as any)._meta);
 
-  // Try both _meta (spec) and meta (Python SDK quirk)
+  // Try both _meta (spec) and meta (Python SDK quirk) for content-level
   const contentMeta = (content as any)._meta || (content as any).meta;
-  const csp = contentMeta?.ui?.csp;
-  const permissions = contentMeta?.ui?.permissions;
+
+  // Get listing-level metadata as fallback
+  const listingResource = serverInfo.resources.get(uri);
+  const listingMeta = (listingResource as any)?._meta;
+  log.info("Resource listing._meta:", listingMeta);
+
+  // Content-level takes precedence, fall back to listing-level
+  const uiMeta = contentMeta?.ui ?? listingMeta?.ui;
+  const csp = uiMeta?.csp;
+  const permissions = uiMeta?.permissions;
 
   return { html, csp, permissions };
 }

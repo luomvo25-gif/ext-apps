@@ -7,14 +7,14 @@ import { test, expect, type Page, type ConsoleMessage } from "@playwright/test";
 //
 // Note: map-server uses SLOW_SERVERS timeout instead of masking to wait for tiles
 const DYNAMIC_MASKS: Record<string, string[]> = {
-  integration: ["#server-time"], // Server time display
-  "basic-preact": ["#server-time"], // Server time display
-  "basic-react": ["#server-time"], // Server time display
-  "basic-solid": ["#server-time"], // Server time display
-  "basic-svelte": ["#server-time"], // Server time display
+  integration: ['[class*="serverTime"]'], // Server time display [CSS module]
+  "basic-preact": ['[class*="serverTime"]'], // Server time display [CSS module]
+  "basic-react": ['[class*="serverTime"]'], // Server time display [CSS module]
+  "basic-solid": ['[class*="serverTime"]'], // Server time display [CSS module]
+  "basic-svelte": [".server-time"], // Server time display (component-scoped)
   "basic-vanillajs": ["#server-time"], // Server time display
-  "basic-vue": ["#server-time"], // Server time display
-  "cohort-heatmap": ['[class*="heatmapWrapper"]'], // Heatmap grid (random data)
+  "basic-vue": [".server-time"], // Server time display (scoped styles)
+  "cohort-heatmap": ['[class*="heatmapWrapper"]'], // Heatmap grid (random data) [CSS module]
   "customer-segmentation": [".chart-container"], // Scatter plot (random data)
   "debug-server": ["#event-log", "#callback-table-body"], // Event log and callback counts (dynamic)
   quickstart: ["#server-time"], // Server time display
@@ -35,7 +35,6 @@ const DYNAMIC_MASKS: Record<string, string[]> = {
 // Servers that need extra stabilization time (e.g., for tile loading, WebGL init)
 const SLOW_SERVERS: Record<string, number> = {
   "map-server": 15000, // CesiumJS needs time for tiles to load
-  "arcade-server": 15000, // Game loading from archive.org can be slow
   threejs: 2000, // Three.js WebGL initialization
   "say-server": 10000, // TTS model download from HuggingFace can be slow
 };
@@ -58,7 +57,6 @@ const HOST_MASKS: Record<string, string[]> = {
 
 // Servers to skip in CI (require special resources like GPU, large ML models)
 const SKIP_SERVERS = new Set<string>([
-  "arcade-server", // Loads games from archive.org which may be slow/unreliable in CI
   "qr-server", // TODO
   "say-server", // TTS model download from HuggingFace can be slow
 ]);
@@ -68,7 +66,6 @@ const EXAMPLE_FILTER = process.env.EXAMPLE;
 
 // Server configurations (key is used for screenshot filenames, name is the MCP server name, dir is the folder name)
 const ALL_SERVERS = [
-  { key: "arcade-server", name: "Arcade Server", dir: "arcade-server" },
   {
     key: "integration",
     name: "Integration Test Server",

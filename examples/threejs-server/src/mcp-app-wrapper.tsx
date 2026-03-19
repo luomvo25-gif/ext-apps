@@ -5,9 +5,9 @@
  * props to the actual view component.
  */
 import type { App, McpUiHostContext } from "@modelcontextprotocol/ext-apps";
-import { useApp, useHostStyles } from "@modelcontextprotocol/ext-apps/react";
+import { useApp } from "@modelcontextprotocol/ext-apps/react";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { StrictMode, useState, useCallback, useEffect } from "react";
+import { StrictMode, useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import ThreeJSApp from "./threejs-app.tsx";
 import "./global.css";
@@ -21,6 +21,8 @@ import "./global.css";
  * This interface can be reused for other views.
  */
 export interface ViewProps<TToolInput = Record<string, unknown>> {
+  /** The connected MCP App instance */
+  app: App;
   /** Complete tool input (after streaming finishes) */
   toolInputs: TToolInput | null;
   /** Partial tool input (during streaming) */
@@ -29,14 +31,6 @@ export interface ViewProps<TToolInput = Record<string, unknown>> {
   toolResult: CallToolResult | null;
   /** Host context (theme, dimensions, locale, etc.) */
   hostContext: McpUiHostContext | null;
-  /** Call a tool on the MCP server */
-  callServerTool: App["callServerTool"];
-  /** Send a message to the host's chat */
-  sendMessage: App["sendMessage"];
-  /** Request the host to open a URL */
-  openLink: App["openLink"];
-  /** Send log messages to the host */
-  sendLog: App["sendLog"];
 }
 
 // =============================================================================
@@ -72,14 +66,39 @@ function McpAppWrapper() {
         setToolResult(params as CallToolResult);
       };
       // Host context changes (theme, dimensions, etc.)
+      // Note: we handle styles here instead of using useHostStyles,
+      // because useHostStyles overwrites onhostcontextchanged.
       app.onhostcontextchanged = (params) => {
+        const root = document.documentElement;
+        if (params.theme) {
+          root.setAttribute("data-theme", params.theme);
+          root.style.colorScheme = params.theme;
+        }
+        if (params.styles?.variables) {
+          for (const [k, v] of Object.entries(params.styles.variables)) {
+            if (v !== undefined) root.style.setProperty(k, v as string);
+          }
+        }
         setHostContext((prev) => ({ ...prev, ...params }));
       };
     },
   });
 
-  // Apply host styling (theme, CSS variables, fonts)
-  useHostStyles(app);
+  // Apply initial host styles
+  useEffect(() => {
+    if (!app) return;
+    const ctx = app.getHostContext();
+    const root = document.documentElement;
+    if (ctx?.theme) {
+      root.setAttribute("data-theme", ctx.theme);
+      root.style.colorScheme = ctx.theme;
+    }
+    if (ctx?.styles?.variables) {
+      for (const [k, v] of Object.entries(ctx.styles.variables)) {
+        if (v !== undefined) root.style.setProperty(k, v as string);
+      }
+    }
+  }, [app]);
 
   // Get initial host context after connection
   useEffect(() => {
@@ -91,24 +110,6 @@ function McpAppWrapper() {
     }
   }, [app]);
 
-  // Memoized callbacks that forward to app methods
-  const callServerTool = useCallback<App["callServerTool"]>(
-    (params, options) => app!.callServerTool(params, options),
-    [app],
-  );
-  const sendMessage = useCallback<App["sendMessage"]>(
-    (params, options) => app!.sendMessage(params, options),
-    [app],
-  );
-  const openLink = useCallback<App["openLink"]>(
-    (params, options) => app!.openLink(params, options),
-    [app],
-  );
-  const sendLog = useCallback<App["sendLog"]>(
-    (params) => app!.sendLog(params),
-    [app],
-  );
-
   if (error) {
     return <div className="error">Error: {error.message}</div>;
   }
@@ -119,14 +120,11 @@ function McpAppWrapper() {
 
   return (
     <ThreeJSApp
+      app={app}
       toolInputs={toolInputs}
       toolInputsPartial={toolInputsPartial}
       toolResult={toolResult}
       hostContext={hostContext}
-      callServerTool={callServerTool}
-      sendMessage={sendMessage}
-      openLink={openLink}
-      sendLog={sendLog}
     />
   );
 }
