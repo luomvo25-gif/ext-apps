@@ -1230,7 +1230,7 @@ Use this tool when the user wants to view or read a PDF. The renderer displays t
 Accepts local files (use list_pdfs), client MCP root directories, or any HTTPS URL.`
         : `Open a PDF in an interactive viewer. Call this ONCE per PDF.
 
-**All follow-up actions go through the \`interact\` tool** with the returned viewUUID — annotating, signing, stamping, filling forms, navigating, searching, extracting text/screenshots. Calling display_pdf again creates a second viewer and discards the existing one with all its state.
+**All follow-up actions go through the \`interact\` tool** with the returned viewUUID — annotating, signing, stamping, filling forms, navigating, searching, extracting text/screenshots. Calling display_pdf again creates a SEPARATE viewer with a different viewUUID — interact calls using the new UUID will not reach the viewer the user already sees.
 
 Returns a viewUUID in structuredContent. Pass it to \`interact\`:
 - add_annotations, update_annotations, remove_annotations, highlight_text
@@ -1403,7 +1403,7 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
             : `PDF opened. viewUUID: ${uuid}
 
 → To annotate, sign, stamp, fill forms, navigate, or extract: call \`interact\` with this viewUUID.
-→ DO NOT call display_pdf again — that creates a second viewer and loses all state.
+→ DO NOT call display_pdf again — that spawns a separate viewer with a different viewUUID; your interact calls would target the new empty one, not the one the user is looking at.
 
 URL: ${normalized}`,
         },
