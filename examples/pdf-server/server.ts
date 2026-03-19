@@ -1562,27 +1562,42 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
     /**
      * Resolve an image annotation: fetch imageUrl → imageData if needed,
      * auto-detect dimensions, and set defaults for x/y.
+     *
+     * SECURITY: imageUrl is model-controlled. It must pass the same
+     * validateUrl() gate as display_pdf/save_pdf — otherwise the model
+     * can request `{imageUrl:"/Users/x/.ssh/id_rsa"}`, we'd readFile it,
+     * base64 the bytes, ship them to the iframe, and get_screenshot (or
+     * any future echo path) reads them back. Throws on rejection so the
+     * tool result carries the error; silent skip hides the attack attempt.
      */
     async function resolveImageAnnotation(
       ann: Record<string, any>,
     ): Promise<void> {
       // Fetch image data from URL if no imageData provided
       if (!ann.imageData && ann.imageUrl) {
-        try {
-          let imgBytes: Uint8Array;
-          const url = ann.imageUrl as string;
-          if (url.startsWith("http://") || url.startsWith("https://")) {
-            const resp = await fetch(url);
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            imgBytes = new Uint8Array(await resp.arrayBuffer());
-          } else {
-            // Treat as file path
-            imgBytes = await fs.promises.readFile(url);
-          }
-          ann.imageData = Buffer.from(imgBytes).toString("base64");
-        } catch (err) {
-          console.error(`Failed to fetch image from ${ann.imageUrl}:`, err);
+        const url = String(ann.imageUrl);
+        // Same gate as every other local/remote read in this server.
+        // Local: must be in allowedLocalFiles or under allowedLocalDirs.
+        // Remote: must be https://.
+        const check = validateUrl(url);
+        if (!check.valid) {
+          throw new Error(
+            `imageUrl rejected by validateUrl: ${check.error ?? url}`,
+          );
         }
+        let imgBytes: Uint8Array;
+        if (url.startsWith("https://")) {
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${url}`);
+          imgBytes = new Uint8Array(await resp.arrayBuffer());
+        } else {
+          // validateUrl already confirmed this path is under an allowed root.
+          const filePath = isFileUrl(url)
+            ? fileUrlToPath(url)
+            : decodeURIComponent(url);
+          imgBytes = await fs.promises.readFile(path.resolve(filePath));
+        }
+        ann.imageData = Buffer.from(imgBytes).toString("base64");
       }
 
       // Auto-detect mimeType from magic bytes if not set
@@ -1741,11 +1756,25 @@ Set \`elicit_form_inputs\` to true to prompt the user to fill form fields before
               ],
               isError: true,
             };
-          // Resolve image annotations: fetch imageUrl → imageData, auto-detect dimensions
-          for (const ann of annotations) {
-            if ((ann as any).type === "image") {
-              await resolveImageAnnotation(ann as any);
+          // Resolve image annotations: fetch imageUrl → imageData, auto-detect dimensions.
+          // Rejection (path not allowed, not https, fetch failed) surfaces as
+          // a tool error so the model sees it — don't silently skip.
+          try {
+            for (const ann of annotations) {
+              if ((ann as any).type === "image") {
+                await resolveImageAnnotation(ann as any);
+              }
             }
+          } catch (err) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `add_annotations: ${err instanceof Error ? err.message : String(err)}`,
+                },
+              ],
+              isError: true,
+            };
           }
           enqueueCommand(uuid, {
             type: "add_annotations",

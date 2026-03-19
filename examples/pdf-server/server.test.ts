@@ -959,4 +959,99 @@ describe("interact tool", () => {
     await client.close();
     await server.close();
   });
+
+  // SECURITY: resolveImageAnnotation must not read arbitrary local files.
+  // The model controls imageUrl; without validation it's an exfil primitive
+  // (readFile → base64 → iframe → get_screenshot reads it back).
+  describe("add_annotations image: imageUrl validation", () => {
+    let savedDirs: Set<string>;
+    beforeEach(() => {
+      savedDirs = new Set(allowedLocalDirs);
+      allowedLocalDirs.clear();
+    });
+    afterEach(() => {
+      allowedLocalDirs.clear();
+      for (const d of savedDirs) allowedLocalDirs.add(d);
+    });
+
+    it("rejects local path outside allowed roots", async () => {
+      const { server, client } = await connect();
+      // Whitelist a harmless temp dir; target a path clearly outside it.
+      allowedLocalDirs.add(os.tmpdir());
+      const target = path.join(os.homedir(), ".ssh", "id_rsa");
+      const r = await client.callTool({
+        name: "interact",
+        arguments: {
+          viewUUID: "sec-local",
+          action: "add_annotations",
+          annotations: [{ type: "image", id: "i1", page: 1, imageUrl: target }],
+        },
+      });
+      expect(r.isError).toBe(true);
+      expect(firstText(r)).toContain("imageUrl rejected");
+      await client.close();
+      await server.close();
+    });
+
+    it("rejects http:// URL (SSRF)", async () => {
+      const { server, client } = await connect();
+      const r = await client.callTool({
+        name: "interact",
+        arguments: {
+          viewUUID: "sec-http",
+          action: "add_annotations",
+          annotations: [
+            {
+              type: "image",
+              id: "i1",
+              page: 1,
+              imageUrl: "http://169.254.169.254/latest/meta-data/",
+            },
+          ],
+        },
+      });
+      expect(r.isError).toBe(true);
+      expect(firstText(r)).toContain("imageUrl rejected");
+      await client.close();
+      await server.close();
+    });
+
+    it("accepts path under an allowed dir (reaches readFile)", async () => {
+      const { server, client } = await connect();
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pdf-imgurl-"));
+      allowedLocalDirs.add(dir);
+      // Minimal valid PNG (1x1 transparent): 8-byte sig + IHDR + IDAT + IEND.
+      const png = Buffer.from(
+        "89504E470D0A1A0A0000000D49484452000000010000000108060000001F15C4890000000A49444154789C6360000000000200015E9AFE400000000049454E44AE426082",
+        "hex",
+      );
+      const imgPath = path.join(dir, "sig.png");
+      fs.writeFileSync(imgPath, png);
+      try {
+        const r = await client.callTool({
+          name: "interact",
+          arguments: {
+            viewUUID: "sec-ok",
+            action: "add_annotations",
+            annotations: [
+              { type: "image", id: "i1", page: 1, imageUrl: imgPath },
+            ],
+          },
+        });
+        // No security rejection; readFile succeeds; command enqueued.
+        expect(r.isError).toBeFalsy();
+        const cmds = await poll(client, "sec-ok");
+        expect(cmds).toHaveLength(1);
+        expect(cmds[0].type).toBe("add_annotations");
+        const anns = cmds[0].annotations as Array<Record<string, unknown>>;
+        // validateUrl passed → readFile ran → imageData populated.
+        expect(typeof anns[0].imageData).toBe("string");
+        expect((anns[0].imageData as string).length).toBeGreaterThan(0);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+      await client.close();
+      await server.close();
+    });
+  });
 });
