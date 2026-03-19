@@ -2497,12 +2497,20 @@ function restoreAnnotations(): void {
     // Try new diff-based format first
     const diff = deserializeDiff(raw);
 
-    // Merge baseline + diff
+    // Merge baseline + diff. The loop below is add-only, so we MUST also
+    // delete: loadBaselineAnnotations() runs between the two restore calls
+    // and re-seeds annotationMap with every baseline id — including the
+    // ones in diff.removed. Without this, the zombie survives the restore,
+    // and the next persistAnnotations() sees it in currentIds → computeDiff
+    // produces removed=[] → the deletion is permanently lost from storage.
     const merged = mergeAnnotations(pdfBaselineAnnotations, diff);
     for (const def of merged) {
       if (!annotationMap.has(def.id)) {
         annotationMap.set(def.id, { def, elements: [] });
       }
+    }
+    for (const id of diff.removed) {
+      annotationMap.delete(id);
     }
 
     // Restore form fields
@@ -2739,10 +2747,22 @@ async function getAnnotatedPdfBytes(): Promise<Uint8Array> {
     }
   }
 
+  // buildAnnotatedPdfBytes gates on formFields.size > 0 and only writes
+  // entries present in the map. After clearAllItems() the map is empty →
+  // zero setText/uncheck calls → pdf-lib leaves original /V intact →
+  // the "stripped PDF" we promised keeps all its form data. To actually
+  // clear, send an explicit sentinel for every baseline field the user
+  // dropped: "" for text, false for checkbox (matching baseline type).
+  const formFieldsOut = new Map(formFieldValues);
+  for (const [name, baselineValue] of pdfBaselineFormValues) {
+    if (!formFieldsOut.has(name)) {
+      formFieldsOut.set(name, typeof baselineValue === "boolean" ? false : "");
+    }
+  }
   return buildAnnotatedPdfBytes(
     fullBytes as Uint8Array,
     annotations,
-    formFieldValues,
+    formFieldsOut,
   );
 }
 
@@ -4147,24 +4167,33 @@ async function processCommands(commands: PdfCommand[]): Promise<void> {
         for (const update of cmd.annotations) {
           const existing = annotationMap.get(update.id);
           if (!existing) continue;
-          const pageHeight = await getPageHeight(existing.def.page);
-          // Merge partial update into existing def, convert the merged result,
-          // then extract only the fields that were in the original update
-          const merged = { ...existing.def, ...update } as PdfAnnotationDef;
-          const converted = convertFromModelCoords(merged, pageHeight);
-          const convertedUpdate = { ...update } as Record<string, unknown> &
-            typeof update;
-          for (const key of Object.keys(update)) {
-            convertedUpdate[key] = (
-              converted as unknown as Record<string, unknown>
-            )[key];
-          }
-          updateAnnotation(
-            convertedUpdate as Partial<PdfAnnotationDef> & {
-              id: string;
-              type: string;
-            },
-          );
+          // The model sends model coords (y-down, y = top-left). existing.def
+          // is internal coords (y-up, y = bottom-left). For rect/circle/image
+          // the converted internal y = pageHeight - modelY - height — a function
+          // of BOTH y AND height. If the model patches only {height}, we must
+          // still rewrite internal y to keep the top fixed; otherwise the
+          // bottom stays fixed and the top shifts. Same coupling applies to
+          // {page} changes across differently-sized pages.
+          //
+          // Fix: round-trip through model space. Convert existing to model
+          // coords, spread the patch on top (all-model now), convert back.
+          // convertToModelCoords is self-inverse (pdf-annotations.ts:192) so
+          // unchanged fields pass through unmolested.
+          const srcPageH = await getPageHeight(existing.def.page);
+          const existingModel = convertToModelCoords(existing.def, srcPageH);
+          const mergedModel = {
+            ...existingModel,
+            ...update,
+          } as PdfAnnotationDef;
+          const dstPageH =
+            update.page != null && update.page !== existing.def.page
+              ? await getPageHeight(update.page)
+              : srcPageH;
+          const mergedInternal = convertFromModelCoords(mergedModel, dstPageH);
+          // Pass the FULL merged def. updateAnnotation() already merges over
+          // the tracked def, so passing everything is correct and avoids the
+          // "only copy back Object.keys(update)" loop that caused the bug.
+          updateAnnotation(mergedInternal);
         }
         break;
       case "remove_annotations":
