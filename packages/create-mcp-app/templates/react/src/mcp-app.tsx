@@ -2,7 +2,6 @@ import { useApp } from "@modelcontextprotocol/ext-apps/react";
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-
 function McpApp() {
   const [message, setMessage] = useState("Connecting...");
 

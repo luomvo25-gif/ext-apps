@@ -57,7 +57,8 @@ async function copyDir(
  * Scaffold a new MCP App project
  */
 export async function scaffold(options: ScaffoldOptions): Promise<void> {
-  const { projectName, template, targetDir, sdkVersion, mcpSdkVersion } = options;
+  const { projectName, template, targetDir, sdkVersion, mcpSdkVersion } =
+    options;
   const templatesDir = getTemplatesDir();
   const targetPath = path.resolve(process.cwd(), targetDir);
 

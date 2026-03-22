@@ -18,7 +18,11 @@ const createMcpAppDir = path.resolve(
 
 function run(args, cwd) {
   console.log(`  $ ${args.join(" ")}`);
-  execFileSync(args[0], args.slice(1), { cwd, stdio: "inherit", timeout: TIMEOUT });
+  execFileSync(args[0], args.slice(1), {
+    cwd,
+    stdio: "inherit",
+    timeout: TIMEOUT,
+  });
 }
 
 let failed = false;
@@ -33,10 +37,7 @@ for (const template of TEMPLATES) {
   try {
     // Scaffold using the CLI directly (built dist)
     const cliPath = path.join(createMcpAppDir, "dist", "index.js");
-    run(
-      ["node", cliPath, projectName, "--framework", template],
-      tmpRoot,
-    );
+    run(["node", cliPath, projectName, "--framework", template], tmpRoot);
 
     // Verify key files exist
     const pkg = JSON.parse(

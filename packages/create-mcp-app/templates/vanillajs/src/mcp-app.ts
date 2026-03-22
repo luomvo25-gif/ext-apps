@@ -7,7 +7,6 @@ import {
 } from "@modelcontextprotocol/ext-apps";
 import "./global.css";
 
-
 const messageEl = document.getElementById("message")!;
 
 function handleHostContextChanged(ctx: McpUiHostContext) {

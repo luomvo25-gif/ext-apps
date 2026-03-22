@@ -12,13 +12,16 @@ export const SDK_VERSION: string = JSON.parse(
 /** MCP SDK version - read from the installed @modelcontextprotocol/sdk package */
 export const MCP_SDK_VERSION: string = (() => {
   // Resolve any entry point in the SDK, then walk up to find the package root
-  const sdkEntry = fileURLToPath(import.meta.resolve("@modelcontextprotocol/sdk"));
+  const sdkEntry = fileURLToPath(
+    import.meta.resolve("@modelcontextprotocol/sdk"),
+  );
   let dir = path.dirname(sdkEntry);
   while (dir !== path.dirname(dir)) {
     const candidate = path.join(dir, "package.json");
     if (fs.existsSync(candidate)) {
       const pkg = JSON.parse(fs.readFileSync(candidate, "utf-8"));
-      if (pkg.name === "@modelcontextprotocol/sdk") return pkg.version as string;
+      if (pkg.name === "@modelcontextprotocol/sdk")
+        return pkg.version as string;
     }
     dir = path.dirname(dir);
   }
@@ -54,7 +57,6 @@ export function validateProjectName(
   if (/[<>:"/\\|?*\x00-\x1f]/.test(name)) {
     return "Project name contains invalid characters";
   }
-
 
   return undefined;
 }
