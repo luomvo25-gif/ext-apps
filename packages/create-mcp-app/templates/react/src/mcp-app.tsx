@@ -17,7 +17,7 @@ function McpApp() {
   if (error) return <div>Error: {error.message}</div>;
 
   return (
-    <main className="main">
+    <main style={{ padding: "1rem" }}>
       <p>{message}</p>
     </main>
   );

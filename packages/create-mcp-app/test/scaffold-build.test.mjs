@@ -6,13 +6,14 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const TEMPLATES = ["react", "vanillajs"];
 const TIMEOUT = 120_000; // 2 minutes per template
 
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "create-mcp-app-test-"));
 const createMcpAppDir = path.resolve(
-  new URL(".", import.meta.url).pathname,
+  path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
 
