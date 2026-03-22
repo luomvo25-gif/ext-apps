@@ -29,23 +29,36 @@ export function createServer(): McpServer {
   // TODO: Replace with your own tool and resource.
   const resourceUri = "ui://my-tool/mcp-app.html";
 
-  registerAppTool(server, "my-tool", {
-    title: "My Tool",
-    description: "TODO: Describe what this tool does.",
-    inputSchema: {},
-    _meta: { ui: { resourceUri } },
-  }, async (): Promise<CallToolResult> => {
-    return { content: [{ type: "text", text: "TODO: Return tool result." }] };
-  });
+  registerAppTool(
+    server,
+    "my-tool",
+    {
+      title: "My Tool",
+      description: "TODO: Describe what this tool does.",
+      inputSchema: {},
+      _meta: { ui: { resourceUri } },
+    },
+    async (): Promise<CallToolResult> => {
+      return { content: [{ type: "text", text: "TODO: Return tool result." }] };
+    },
+  );
 
-  registerAppResource(server, resourceUri, resourceUri, {
-    mimeType: RESOURCE_MIME_TYPE,
-  }, async (): Promise<ReadResourceResult> => {
-    const html = await readAppHtml("mcp-app.html");
-    return {
-      contents: [{ uri: resourceUri, mimeType: RESOURCE_MIME_TYPE, text: html }],
-    };
-  });
+  registerAppResource(
+    server,
+    resourceUri,
+    resourceUri,
+    {
+      mimeType: RESOURCE_MIME_TYPE,
+    },
+    async (): Promise<ReadResourceResult> => {
+      const html = await readAppHtml("mcp-app.html");
+      return {
+        contents: [
+          { uri: resourceUri, mimeType: RESOURCE_MIME_TYPE, text: html },
+        ],
+      };
+    },
+  );
 
   return server;
 }
