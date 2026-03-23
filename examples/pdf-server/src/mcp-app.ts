@@ -3875,7 +3875,11 @@ async function loadPdfProgressively(urlToLoad: string): Promise<{
     requestDataRange(begin: number, end: number) {
       fetchRange(urlToLoad, begin, end)
         .then((result) => {
-          this.onDataRange(begin, result.bytes);
+          // PDF.js transfers the ArrayBuffer to its worker, detaching it.
+          // Pass a copy so the rangeCache entry stays valid for re-requests
+          // (iOS/WKWebView re-requests ranges under memory pressure and
+          // throws "Buffer is already detached" on the cached original).
+          this.onDataRange(begin, result.bytes.slice());
         })
         .catch((err: unknown) => {
           log.error(`Error fetching range ${begin}-${end}:`, err);

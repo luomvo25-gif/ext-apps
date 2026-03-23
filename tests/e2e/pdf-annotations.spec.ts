@@ -50,7 +50,7 @@ async function extractViewUUID(page: Page): Promise<string> {
   const resultText = (await resultContent.textContent()) ?? "";
 
   // Extract viewUUID from the JSON result
-  // The text content includes: "Displaying PDF (viewUUID: <uuid>): ..."
+  // The text content includes: "PDF opened. viewUUID: <uuid>"
   const match = resultText.match(/viewUUID["\s:]+([a-f0-9-]{36})/);
   if (!match) {
     throw new Error(
@@ -107,7 +107,7 @@ test.describe("PDF Server - Annotations", () => {
     // (interact action list lives in the tool description, not the runtime result).
     expect(resultText).toContain("viewUUID");
     expect(resultText).toContain("interactEnabled");
-    expect(resultText).toContain("Displaying PDF");
+    expect(resultText).toContain("PDF opened");
   });
 
   test("interact tool is available in tool dropdown", async ({ page }) => {
