@@ -1,56 +1,56 @@
 ---
 title: Troubleshooting
 group: Getting Started
-description: Diagnose common issues with MCP Apps — blank iframes, CSP errors, missing tool callbacks, and cross-host rendering differences.
+description: Diagnose common MCP App issues including blank iframes, CSP errors, missing tool callbacks, and cross-host rendering differences.
 ---
 
 # Troubleshooting
 
-## The App renders a blank iframe
+## Blank iframe
 
-This is almost always one of four things. Check them in order:
+The most common causes, in the order you should check them:
 
-**1. Open the browser developer console inside the iframe.** Right-click inside the App area → _Inspect_, then switch the console's context dropdown (top-left of the Console tab) from `top` to the sandboxed iframe. Any uncaught JavaScript error will stop your App before it paints.
+1. **Uncaught JavaScript error.** Open browser developer tools inside the iframe: right-click the App area, choose _Inspect_, then switch the console context dropdown (top-left of the Console tab) from `top` to the sandboxed frame. An uncaught error stops the App before it paints.
 
-**2. Check for CSP violations.** Look for `Refused to connect to…` or `Refused to load…` messages. If your App fetches anything over the network — including `localhost` during development — you must declare it in `_meta.ui.csp.connectDomains` or `resourceDomains`. See the [CSP & CORS guide](./csp-cors.md).
+2. **CSP violation.** Look for `Refused to connect to…` or `Refused to load…` in the console. Any network request, including to `localhost` during development, must be declared in `_meta.ui.csp.connectDomains` or `resourceDomains`. See the [CSP & CORS guide](./csp-cors.md).
 
-**3. Verify the resource URI matches exactly.** The `_meta.ui.resourceUri` on your tool must be character-for-character identical to the URI you registered with `registerAppResource` (or `server.registerResource`). A trailing slash or case mismatch means the host can't find your HTML.
+3. **Resource URI mismatch.** The `_meta.ui.resourceUri` on the tool must match the URI passed to `registerAppResource` exactly. A trailing slash or case difference prevents the host from finding the HTML.
 
-**4. Verify the MIME type.** The resource's `mimeType` must be `text/html;profile=mcp-app` (exported as {@link app!RESOURCE_MIME_TYPE `RESOURCE_MIME_TYPE`}). Plain `text/html` won't be recognized as an App.
+4. **Wrong MIME type.** The resource's `mimeType` must be `text/html;profile=mcp-app` (exported as {@link app!RESOURCE_MIME_TYPE `RESOURCE_MIME_TYPE`}). Plain `text/html` is not recognized as an App resource.
 
 ## `ontoolinput` / `ontoolresult` never fires
 
-- **Register handlers before calling `connect()`.** If you attach `app.ontoolresult = …` after `connect()` resolves, the notification may have already been delivered and discarded. The React `useApp` hook handles this for you; with vanilla JS, set handlers first.
-- **Check the host actually called your tool.** If the model chose a different tool (or none), there's no result to deliver. Verify in the host's tool-call log.
-- **Check SDK version compatibility.** Older SDK versions had stricter schemas for host notifications. If your App was built against a significantly older `@modelcontextprotocol/ext-apps` than the host expects, the initialize handshake may silently fail. Keep the SDK version reasonably current.
+- **Handlers registered too late.** Attach `app.ontoolresult` before calling `connect()`. If the handler is attached after `connect()` resolves, the notification may have already been delivered and discarded. The React `useApp` hook handles this ordering automatically.
+- **Tool was not called.** If the model chose a different tool, or none, there is no result to deliver. Check the host's tool-call log.
+- **SDK version mismatch.** Older SDK versions used stricter schemas for host notifications. If the App was built against a significantly older `@modelcontextprotocol/ext-apps` than the host expects, the initialize handshake can fail silently. Keep the SDK version current.
 
-## The App works in one host but not another
+## App works in one host but not another
 
-MCP Apps are portable by design, but only if you stick to the SDK. Common portability mistakes:
+MCP Apps are portable only if they use the SDK exclusively. Common portability mistakes:
 
-- **Relying on host-specific globals.** Don't reference `window.openai`, `window.claude`, or any other host-injected object. Use the `App` class from this SDK — it speaks the standard protocol to any compliant host.
-- **Hardcoding asset URLs to a specific host's CDN.** Bundle your assets or declare them in `resourceDomains`.
-- **Assuming a specific sandbox origin.** The origin that serves your App varies by host. Don't hardcode it in CORS allowlists; use `_meta.ui.domain` to request a stable origin instead (see [CSP & CORS](./csp-cors.md)).
+- **Host-specific globals.** Do not reference `window.openai`, `window.claude`, or any other host-injected object. Use the `App` class from this SDK, which speaks the standard protocol to any compliant host.
+- **Hardcoded CDN URLs.** Bundle assets into the App or declare their origins in `resourceDomains`.
+- **Hardcoded sandbox origin.** The origin that serves the App varies by host. Use `_meta.ui.domain` to request a stable origin rather than hardcoding one in CORS allowlists. See [CSP & CORS](./csp-cors.md).
 
-## The App keeps growing taller / has the wrong height
+## App grows unbounded or has the wrong height
 
-See [Controlling App height](./patterns.md#controlling-app-height). The usual culprit is `height: 100vh` combined with the default `autoResize: true`.
+See [Controlling App height](./patterns.md#controlling-app-height). The most common cause is `height: 100vh` combined with the default `autoResize: true`.
 
 ## Network requests fail with CORS errors
 
-CSP and CORS are separate controls:
+CSP and CORS are separate controls with different error messages and different fixes:
 
-- **CSP** (`Refused to connect`) — the _browser_ blocked the request because the domain isn't in `connectDomains`. Fix on the MCP server side by adding the domain to `_meta.ui.csp`.
-- **CORS** (`No 'Access-Control-Allow-Origin' header`) — the _API server_ rejected the request because it doesn't recognize the sandbox origin. Fix on the API server side by allowlisting the origin, or use `_meta.ui.domain` to get a predictable origin you can allowlist.
+- **CSP** (`Refused to connect`): The browser blocked the request because the domain is not in `connectDomains`. Add the domain to `_meta.ui.csp` on the MCP server.
+- **CORS** (`No 'Access-Control-Allow-Origin' header`): The API server rejected the request because it does not recognize the sandbox origin. Add the origin to the API server's allowlist, or use `_meta.ui.domain` to get a predictable origin that can be allowlisted.
 
 See the [CSP & CORS guide](./csp-cors.md) for configuration examples.
 
-## The App's background is opaque when it should be transparent
+## Opaque background instead of transparent
 
-If you set `color-scheme: light dark` (or just `dark`) on your document, browsers may insert an opaque backdrop behind the iframe when the host's color scheme doesn't match. Remove the `color-scheme` declaration and use the `[data-theme]` attribute pattern from the [host context guide](./patterns.md#adapting-to-host-context-theme-styling-fonts-and-safe-areas) instead.
+If the App declares `color-scheme: light dark` (or `color-scheme: dark`) and the host document does not, browsers insert an opaque backdrop behind the iframe to prevent cross-scheme bleed-through. Remove the `color-scheme` declaration and use the `[data-theme]` attribute pattern from the [host context guide](./patterns.md#adapting-to-host-context-theme-styling-fonts-and-safe-areas).
 
-## Where to get help
+## Getting help
 
-- Test against the reference host: `npm start` in this repo serves `examples/basic-host` at `http://localhost:8080`, which logs all protocol traffic to the console.
-- Check the [GitHub Discussions](https://github.com/modelcontextprotocol/ext-apps/discussions) for similar issues.
+- Test against the reference host: run `npm start` in this repository to serve `examples/basic-host` at `http://localhost:8080`. It logs all protocol traffic to the console.
+- Search [GitHub Discussions](https://github.com/modelcontextprotocol/ext-apps/discussions) for similar issues.
 - File a bug with a minimal reproduction in [GitHub Issues](https://github.com/modelcontextprotocol/ext-apps/issues).

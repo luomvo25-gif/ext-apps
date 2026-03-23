@@ -110,7 +110,7 @@ Resources are declared upfront, during tool registration. This design enables:
 - **Separation of concerns** — Templates (presentation) are separate from tool results (data)
 - **Review** — Hosts can inspect UI templates during connection setup
 
-**Versioning and caching.** Resource caching behavior is host-defined. A host may re-fetch your `ui://` resource each time it renders, cache it for the session, or persist it alongside the conversation. This means a user revisiting an old conversation may see either your _current_ template code running against the _original_ tool result, or a snapshot of both from when the tool first ran. Design your App to tolerate older `structuredContent` shapes — treat unknown fields gracefully and don't assume the template and the data were produced by the same code version.
+**Versioning and caching.** Resource caching behavior is host-defined. A host may re-fetch the `ui://` resource on each render, cache it for the session, or persist it alongside the conversation. When a user revisits an old conversation, the host may run the current template code against the original tool result, or it may replay a snapshot of both from the time of the original tool call. Design the App to tolerate older `structuredContent` shapes: handle unknown fields gracefully and do not assume the template and the data were produced by the same code version.
 
 See the [UI Resource Format](https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx#ui-resource-format) section of the specification for the full schema.
 
