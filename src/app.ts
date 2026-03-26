@@ -352,6 +352,15 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
 
     this._registeredTools[name] = registeredTool;
 
+    // Auto-register tools capability so setRequestHandler's capability check
+    // passes. Mirrors McpServer.registerTool behavior — callers shouldn't need
+    // to declare { tools: {} } in the constructor just to use registerTool.
+    // Only do this pre-connect; post-connect the capability was already
+    // advertised (or wasn't) and can't change.
+    if (!this._capabilities.tools && !this.transport) {
+      this.registerCapabilities({ tools: { listChanged: true } });
+    }
+
     this.ensureToolHandlersInitialized();
     return registeredTool;
   }
