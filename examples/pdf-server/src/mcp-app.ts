@@ -2329,17 +2329,21 @@ async function renderPageOffscreen(pageNum: number): Promise<string> {
   return dataUrl.split(",")[1];
 }
 
-async function handleGetPages(cmd: {
-  requestId: string;
-  intervals: Array<{ start?: number; end?: number }>;
-  getText: boolean;
-  getScreenshots: boolean;
-}): Promise<void> {
-  const allPages = expandIntervals(cmd.intervals);
+/**
+ * Collect text and/or screenshots for a set of page intervals.
+ * Shared by the server-driven `get_pages` command (via handleGetPages)
+ * and the app-registered `get_text` / `get_screenshot` tools.
+ */
+async function collectPageData(
+  intervals: Array<{ start?: number; end?: number }>,
+  getText: boolean,
+  getScreenshots: boolean,
+): Promise<Array<{ page: number; text?: string; image?: string }>> {
+  const allPages = expandIntervals(intervals);
   const pages = allPages.slice(0, MAX_GET_PAGES);
 
   log.info(
-    `get_pages: ${pages.length} pages (${pages[0]}..${pages[pages.length - 1]}), text=${cmd.getText}, screenshots=${cmd.getScreenshots}`,
+    `collectPageData: ${pages.length} pages (${pages[0]}..${pages[pages.length - 1]}), text=${getText}, screenshots=${getScreenshots}`,
   );
 
   const results: Array<{
@@ -2353,7 +2357,7 @@ async function handleGetPages(cmd: {
       page: pageNum,
     };
 
-    if (cmd.getText) {
+    if (getText) {
       // Use cached text if available, otherwise extract on the fly
       let text = pageTextCache.get(pageNum);
       if (text == null && pdfDocument) {
@@ -2366,7 +2370,7 @@ async function handleGetPages(cmd: {
           pageTextCache.set(pageNum, text);
         } catch (err) {
           log.error(
-            `get_pages: text extraction failed for page ${pageNum}:`,
+            `collectPageData: text extraction failed for page ${pageNum}:`,
             err,
           );
           text = "";
@@ -2375,16 +2379,34 @@ async function handleGetPages(cmd: {
       entry.text = text ?? "";
     }
 
-    if (cmd.getScreenshots) {
+    if (getScreenshots) {
       try {
         entry.image = await renderPageOffscreen(pageNum);
       } catch (err) {
-        log.error(`get_pages: screenshot failed for page ${pageNum}:`, err);
+        log.error(
+          `collectPageData: screenshot failed for page ${pageNum}:`,
+          err,
+        );
       }
     }
 
     results.push(entry);
   }
+
+  return results;
+}
+
+async function handleGetPages(cmd: {
+  requestId: string;
+  intervals: Array<{ start?: number; end?: number }>;
+  getText: boolean;
+  getScreenshots: boolean;
+}): Promise<void> {
+  const results = await collectPageData(
+    cmd.intervals,
+    cmd.getText,
+    cmd.getScreenshots,
+  );
 
   // Submit results back to server
   try {
@@ -4440,7 +4462,40 @@ app.onteardown = async () => {
 
 app.onhostcontextchanged = handleHostContextChanged;
 
-// Register tools for model interaction
+// =============================================================================
+// App-registered tools — 1:1 with the server's `interact` commands.
+//
+// Each tool constructs the matching PdfCommand and dispatches through
+// processCommands(), so the command-handling logic lives in exactly one
+// place. The server-side `interact` tool remains for hosts that don't
+// support app-registered tools.
+// =============================================================================
+
+/** Shared zod shapes mirroring server.ts interact schema. */
+const FormFieldSchema = z.object({
+  name: z.string(),
+  value: z.union([z.string(), z.boolean()]),
+});
+const PageIntervalSchema = z.object({
+  start: z.number().min(1).optional(),
+  end: z.number().min(1).optional(),
+});
+
+/** Dispatch a command via processCommands and return a text result. */
+async function runCommand(
+  cmd: PdfCommand,
+  okText: string,
+): Promise<CallToolResult> {
+  if (!pdfDocument) {
+    return {
+      content: [{ type: "text" as const, text: "Error: No document loaded" }],
+      isError: true,
+    };
+  }
+  await processCommands([cmd]);
+  return { content: [{ type: "text" as const, text: okText }] };
+}
+
 app.registerTool(
   "get-document-info",
   {
@@ -4471,209 +4526,329 @@ app.registerTool(
 );
 
 app.registerTool(
-  "go-to-page",
+  "navigate",
   {
-    title: "Go to Page",
-    description: "Navigate to a specific page in the document",
+    title: "Navigate",
+    description: "Jump to a specific page in the document",
     inputSchema: z.object({
-      page: z.number().int().positive().describe("Page number (1-indexed)"),
+      page: z.number().int().min(1).describe("Page number (1-indexed)"),
     }),
   },
-  async (args) => {
-    if (!pdfDocument) {
-      return {
-        content: [{ type: "text" as const, text: "Error: No document loaded" }],
-        isError: true,
-      };
-    }
-    if (args.page < 1 || args.page > totalPages) {
+  async ({ page }) => {
+    if (pdfDocument && (page < 1 || page > totalPages)) {
       return {
         content: [
           {
             type: "text" as const,
-            text: `Error: Page ${args.page} out of range (1-${totalPages})`,
+            text: `Error: Page ${page} out of range (1-${totalPages})`,
           },
         ],
         isError: true,
       };
     }
-    currentPage = args.page;
-    await renderPage();
-    updateControls();
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: `Navigated to page ${currentPage}/${totalPages}`,
-        },
-      ],
-    };
+    return runCommand(
+      { type: "navigate", page },
+      `Navigated to page ${page}/${totalPages}`,
+    );
   },
 );
 
 app.registerTool(
-  "get-page-text",
+  "search",
   {
-    title: "Get Page Text",
-    description: "Extract text content from a specific page",
+    title: "Search",
+    description:
+      "Search for text and highlight matches in the viewer UI. Opens the search bar and jumps to the first match.",
+    inputSchema: z.object({
+      query: z.string().describe("Text to search for"),
+    }),
+  },
+  async ({ query }) =>
+    runCommand(
+      { type: "search", query },
+      `Searched for "${query}": ${allMatches.length} match(es)`,
+    ),
+);
+
+app.registerTool(
+  "find",
+  {
+    title: "Find",
+    description:
+      "Silent search — locate matches without opening the search UI. Use before search_navigate.",
+    inputSchema: z.object({
+      query: z.string().describe("Text to search for"),
+    }),
+  },
+  async ({ query }) =>
+    runCommand(
+      { type: "find", query },
+      `Found ${allMatches.length} match(es) for "${query}"`,
+    ),
+);
+
+app.registerTool(
+  "search_navigate",
+  {
+    title: "Search Navigate",
+    description:
+      "Jump to the Nth search match (0-indexed). Call search or find first.",
+    inputSchema: z.object({
+      matchIndex: z.number().int().min(0).describe("Match index (0-indexed)"),
+    }),
+  },
+  async ({ matchIndex }) => {
+    if (allMatches.length === 0) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: "Error: No search results. Call search or find first.",
+          },
+        ],
+        isError: true,
+      };
+    }
+    if (matchIndex >= allMatches.length) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Error: matchIndex ${matchIndex} out of range (0-${allMatches.length - 1})`,
+          },
+        ],
+        isError: true,
+      };
+    }
+    return runCommand(
+      { type: "search_navigate", matchIndex },
+      `Jumped to match ${matchIndex + 1}/${allMatches.length} on page ${allMatches[matchIndex].pageNum}`,
+    );
+  },
+);
+
+app.registerTool(
+  "zoom",
+  {
+    title: "Zoom",
+    description: "Set the zoom scale for the document",
+    inputSchema: z.object({
+      scale: z
+        .number()
+        .min(0.5)
+        .max(3.0)
+        .describe("Zoom scale, 1.0 = 100% (range: 0.5-3.0)"),
+    }),
+  },
+  async ({ scale }) =>
+    runCommand(
+      { type: "zoom", scale },
+      `Zoom set to ${Math.round(scale * 100)}%`,
+    ),
+);
+
+app.registerTool(
+  "add_annotations",
+  {
+    title: "Add Annotations",
+    description:
+      "Add one or more annotations (highlight, note, rectangle, circle, line, stamp, image, freetext). Each needs id, type, page, and type-specific geometry.",
+    inputSchema: z.object({
+      annotations: z
+        .array(z.record(z.string(), z.any()))
+        .min(1)
+        .describe(
+          "Annotation objects. Each needs: id, type, page, plus type-specific fields (x, y, width, height, rects, color, content, etc.)",
+        ),
+    }),
+  },
+  async ({ annotations }) =>
+    runCommand(
+      {
+        type: "add_annotations",
+        annotations: annotations as PdfAnnotationDef[],
+      },
+      `Added ${annotations.length} annotation(s)`,
+    ),
+);
+
+app.registerTool(
+  "update_annotations",
+  {
+    title: "Update Annotations",
+    description:
+      "Patch existing annotations by id. Only id and type are required; other fields are merged.",
+    inputSchema: z.object({
+      annotations: z
+        .array(z.record(z.string(), z.any()))
+        .min(1)
+        .describe("Partial annotation objects. Each needs: id, type."),
+    }),
+  },
+  async ({ annotations }) =>
+    runCommand(
+      {
+        type: "update_annotations",
+        annotations: annotations as Extract<
+          PdfCommand,
+          { type: "update_annotations" }
+        >["annotations"],
+      },
+      `Updated ${annotations.length} annotation(s)`,
+    ),
+);
+
+app.registerTool(
+  "remove_annotations",
+  {
+    title: "Remove Annotations",
+    description: "Delete annotations by id",
+    inputSchema: z.object({
+      ids: z.array(z.string()).min(1).describe("Annotation IDs to remove"),
+    }),
+  },
+  async ({ ids }) =>
+    runCommand(
+      { type: "remove_annotations", ids },
+      `Removed ${ids.length} annotation(s)`,
+    ),
+);
+
+app.registerTool(
+  "highlight_text",
+  {
+    title: "Highlight Text",
+    description:
+      "Auto-locate text and add a highlight annotation. Searches the document (or a specific page) and highlights the first match.",
+    inputSchema: z.object({
+      query: z.string().describe("Text to locate and highlight"),
+      page: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("Restrict search to this page"),
+      color: z.string().optional().describe("Highlight color (CSS color)"),
+      content: z.string().optional().describe("Tooltip/note content"),
+    }),
+  },
+  async ({ query, page, color, content }) => {
+    const id = `ht_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    return runCommand(
+      { type: "highlight_text", id, query, page, color, content },
+      `Highlighted "${query}"${page ? ` on page ${page}` : ""} (id: ${id})`,
+    );
+  },
+);
+
+app.registerTool(
+  "fill_form",
+  {
+    title: "Fill Form",
+    description: "Fill PDF form fields by name",
+    inputSchema: z.object({
+      fields: z
+        .array(FormFieldSchema)
+        .min(1)
+        .describe(
+          "Form fields: { name, value } where value is string or boolean",
+        ),
+    }),
+  },
+  async ({ fields }) =>
+    runCommand(
+      { type: "fill_form", fields },
+      `Filled ${fields.length} field(s): ${fields.map((f) => f.name).join(", ")}`,
+    ),
+);
+
+app.registerTool(
+  "get_text",
+  {
+    title: "Get Text",
+    description:
+      "Extract text from one or more pages. Returns one text block per page.",
     inputSchema: z.object({
       page: z
         .number()
         .int()
-        .positive()
+        .min(1)
         .optional()
-        .describe("Page number (1-indexed). Defaults to current page."),
+        .describe("Single page (shorthand for intervals: [{start:N, end:N}])"),
+      intervals: z
+        .array(PageIntervalSchema)
+        .optional()
+        .describe(
+          "Page ranges. Each has optional start/end. [{start:1,end:5}], [{}] = all pages. Max 20 pages.",
+        ),
     }),
   },
-  async (args) => {
+  async ({ page, intervals }) => {
     if (!pdfDocument) {
       return {
         content: [{ type: "text" as const, text: "Error: No document loaded" }],
         isError: true,
       };
     }
-    const pageNum = args.page ?? currentPage;
-    if (pageNum < 1 || pageNum > totalPages) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error: Page ${pageNum} out of range (1-${totalPages})`,
-          },
-        ],
-        isError: true,
-      };
-    }
-    try {
-      const page = await pdfDocument.getPage(pageNum);
-      const textContent = await page.getTextContent();
-      const pageText = (textContent.items as Array<{ str?: string }>)
-        .map((item) => item.str || "")
-        .join("");
-      return {
-        content: [{ type: "text" as const, text: pageText }],
-        structuredContent: { page: pageNum, text: pageText },
-      };
-    } catch (err) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Error extracting text: ${err instanceof Error ? err.message : String(err)}`,
-          },
-        ],
-        isError: true,
-      };
-    }
-  },
-);
-
-app.registerTool(
-  "search-text",
-  {
-    title: "Search Text",
-    description: "Search for text in the document and return matching pages",
-    inputSchema: z.object({
-      query: z.string().describe("Text to search for"),
-      maxResults: z
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe("Maximum number of results to return (default: 10)"),
-    }),
-  },
-  async (args) => {
-    if (!pdfDocument) {
-      return {
-        content: [{ type: "text" as const, text: "Error: No document loaded" }],
-        isError: true,
-      };
-    }
-    const maxResults = args.maxResults ?? 10;
-    const results: Array<{ page: number; context: string }> = [];
-    const query = args.query.toLowerCase();
-
-    for (let i = 1; i <= totalPages && results.length < maxResults; i++) {
-      try {
-        const page = await pdfDocument.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = (textContent.items as Array<{ str?: string }>)
-          .map((item) => item.str || "")
-          .join("");
-
-        const lowerText = pageText.toLowerCase();
-        const index = lowerText.indexOf(query);
-        if (index !== -1) {
-          // Extract context around the match
-          const start = Math.max(0, index - 50);
-          const end = Math.min(pageText.length, index + query.length + 50);
-          const context = pageText.slice(start, end);
-          results.push({ page: i, context: `...${context}...` });
-        }
-      } catch (err) {
-        log.error(`Error searching page ${i}:`, err);
-      }
-    }
-
-    if (results.length === 0) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `No matches found for "${args.query}"`,
-          },
-        ],
-        structuredContent: { query: args.query, results: [] },
-      };
-    }
-
-    const summary = results
-      .map((r) => `Page ${r.page}: ${r.context}`)
-      .join("\n\n");
+    const resolved = intervals ?? (page ? [{ start: page, end: page }] : [{}]);
+    const data = await collectPageData(resolved, true, false);
+    const parts = data
+      .filter((e) => e.text != null)
+      .map((e) => ({
+        type: "text" as const,
+        text: `--- Page ${e.page} ---\n${e.text}`,
+      }));
     return {
-      content: [
-        {
-          type: "text" as const,
-          text: `Found ${results.length} match(es) for "${args.query}":\n\n${summary}`,
-        },
-      ],
-      structuredContent: { query: args.query, results },
+      content:
+        parts.length > 0
+          ? parts
+          : [{ type: "text" as const, text: "No text content returned" }],
+      structuredContent: { pages: data },
     };
   },
 );
 
 app.registerTool(
-  "set-zoom",
+  "get_screenshot",
   {
-    title: "Set Zoom",
-    description: "Set the zoom level for the document",
+    title: "Get Screenshot",
+    description: "Render a page to a JPEG image for visual analysis",
     inputSchema: z.object({
-      scale: z
-        .number()
-        .min(0.25)
-        .max(4)
-        .describe("Zoom scale (0.25 to 4, where 1 = 100%)"),
+      page: z.number().int().min(1).describe("Page number to render"),
     }),
   },
-  async (args) => {
+  async ({ page }) => {
     if (!pdfDocument) {
       return {
         content: [{ type: "text" as const, text: "Error: No document loaded" }],
         isError: true,
       };
     }
-    scale = args.scale;
-    await renderPage();
-    zoomLevelEl.textContent = `${Math.round(scale * 100)}%`;
-    requestFitToContent();
+    const data = await collectPageData(
+      [{ start: page, end: page }],
+      false,
+      true,
+    );
+    const entry = data[0];
+    if (entry?.image) {
+      return {
+        content: [
+          {
+            type: "image" as const,
+            data: entry.image,
+            mimeType: "image/jpeg",
+          },
+        ],
+      };
+    }
     return {
       content: [
         {
           type: "text" as const,
-          text: `Zoom set to ${Math.round(scale * 100)}%`,
+          text: `Error: screenshot failed for page ${page}`,
         },
       ],
+      isError: true,
     };
   },
 );
