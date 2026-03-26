@@ -633,80 +633,6 @@ export interface McpUiToolMeta {
 }
 
 /**
- * @description Request to capture a screenshot of the App (Host → App).
- * The host sends this request to capture the current visual state of the App.
- * @see {@link app-bridge!AppBridge.screenshot} for the host method that sends this request
- */
-export interface McpUiScreenshotRequest {
-  method: "ui/screenshot";
-  params: {
-    /** @description Format for the screenshot image. Defaults to "png" if not specified. */
-    format?: "png" | "jpeg" | "webp";
-    /** @description Quality for lossy formats (jpeg, webp). Value between 0 and 1. Defaults to 0.92 if not specified. */
-    quality?: number;
-  };
-}
-
-/**
- * @description Result from a screenshot request.
- * @see {@link McpUiScreenshotRequest}
- */
-export interface McpUiScreenshotResult {
-  /** @description Base64-encoded image data. */
-  data: string;
-  /** @description MIME type of the image (e.g., "image/png", "image/jpeg"). */
-  mimeType: string;
-  /** @description Width of the captured image in pixels. */
-  width: number;
-  /** @description Height of the captured image in pixels. */
-  height: number;
-  /** @description True if the screenshot capture failed. */
-  isError?: boolean;
-  /**
-   * Index signature required for MCP SDK `Protocol` class compatibility.
-   * Note: The generated schema uses passthrough() to allow additional properties.
-   */
-  [key: string]: unknown;
-}
-
-/**
- * @description Request to simulate a click at a specific position in the App (Host → App).
- * The host sends this request to simulate user interaction with the App.
- * @see {@link app-bridge!AppBridge.click} for the host method that sends this request
- */
-export interface McpUiClickRequest {
-  method: "ui/click";
-  params: {
-    /** @description X coordinate in pixels, relative to the App's viewport origin. */
-    x: number;
-    /** @description Y coordinate in pixels, relative to the App's viewport origin. */
-    y: number;
-    /** @description Type of click to simulate. Defaults to "click" if not specified. */
-    type?: "click" | "dblclick" | "mousedown" | "mouseup";
-    /** @description Mouse button to simulate. Defaults to "left" if not specified. */
-    button?: "left" | "right" | "middle";
-  };
-}
-
-/**
- * @description Result from a click request.
- * @see {@link McpUiClickRequest}
- */
-export interface McpUiClickResult {
-  /** @description True if the click was successfully dispatched to the target element. */
-  success: boolean;
-  /** @description The element that received the click event, if available. */
-  targetElement?: string;
-  /** @description True if the click dispatch failed. */
-  isError?: boolean;
-  /**
-   * Index signature required for MCP SDK `Protocol` class compatibility.
-   * Note: The generated schema uses passthrough() to allow additional properties.
-   */
-  [key: string]: unknown;
-}
-
-/**
  * Method string constants for MCP Apps protocol messages.
  *
  * These constants provide a type-safe way to check message methods without
@@ -748,9 +674,6 @@ export const INITIALIZED_METHOD: McpUiInitializedNotification["method"] =
   "ui/notifications/initialized";
 export const REQUEST_DISPLAY_MODE_METHOD: McpUiRequestDisplayModeRequest["method"] =
   "ui/request-display-mode";
-export const SCREENSHOT_METHOD: McpUiScreenshotRequest["method"] =
-  "ui/screenshot";
-export const CLICK_METHOD: McpUiClickRequest["method"] = "ui/click";
 
 /**
  * @description MCP Apps capability settings advertised by clients to servers.

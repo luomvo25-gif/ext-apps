@@ -81,12 +81,6 @@ import {
   McpUiRequestDisplayModeRequestSchema,
   McpUiRequestDisplayModeResult,
   McpUiResourcePermissions,
-  McpUiScreenshotRequest,
-  McpUiScreenshotResult,
-  McpUiScreenshotResultSchema,
-  McpUiClickRequest,
-  McpUiClickResult,
-  McpUiClickResultSchema,
 } from "./types";
 export * from "./types";
 export { RESOURCE_URI_META_KEY, RESOURCE_MIME_TYPE } from "./app";
@@ -1346,76 +1340,6 @@ export class AppBridge extends Protocol<
     return this.request(
       { method: "tools/list", params },
       ListToolsResultSchema,
-      options,
-    );
-  }
-
-  /**
-   * Capture a screenshot of the Guest UI.
-   *
-   * Requests the App to render and capture its current visual state. The App
-   * returns the image as a base64-encoded string.
-   *
-   * @param params - Screenshot options (format, quality)
-   * @param options - Request options (timeout, etc.)
-   * @returns Promise resolving to the screenshot data
-   *
-   * @throws {Error} If the App does not support screenshots
-   * @throws {Error} If the request times out or the connection is lost
-   *
-   * @example Capture a PNG screenshot
-   * ```typescript
-   * const result = await bridge.screenshot({ format: "png" });
-   * const img = document.createElement("img");
-   * img.src = `data:${result.mimeType};base64,${result.data}`;
-   * document.body.appendChild(img);
-   * ```
-   */
-  async screenshot(
-    params?: McpUiScreenshotRequest["params"],
-    options?: RequestOptions,
-  ): Promise<McpUiScreenshotResult> {
-    return this.request(
-      {
-        method: "ui/screenshot" as const,
-        params: params ?? {},
-      },
-      McpUiScreenshotResultSchema,
-      options,
-    );
-  }
-
-  /**
-   * Simulate a click at a specific position in the Guest UI.
-   *
-   * Requests the App to dispatch a mouse event at the specified coordinates.
-   * The App should handle this as if the user clicked at that position.
-   *
-   * @param params - Click coordinates and options
-   * @param options - Request options (timeout, etc.)
-   * @returns Promise resolving to the click result
-   *
-   * @throws {Error} If the App does not support click simulation
-   * @throws {Error} If the request times out or the connection is lost
-   *
-   * @example Simple left click
-   * ```typescript
-   * const result = await bridge.click({ x: 100, y: 200 });
-   * if (result.success) {
-   *   console.log(`Clicked on: ${result.targetElement}`);
-   * }
-   * ```
-   */
-  async click(
-    params: McpUiClickRequest["params"],
-    options?: RequestOptions,
-  ): Promise<McpUiClickResult> {
-    return this.request(
-      {
-        method: "ui/click" as const,
-        params,
-      },
-      McpUiClickResultSchema,
       options,
     );
   }

@@ -28,9 +28,6 @@ import { PostMessageTransport } from "./message-transport";
 import {
   LATEST_PROTOCOL_VERSION,
   McpUiAppCapabilities,
-  McpUiClickRequest,
-  McpUiClickRequestSchema,
-  McpUiClickResult,
   McpUiUpdateModelContextRequest,
   McpUiHostCapabilities,
   McpUiHostContext,
@@ -46,9 +43,6 @@ import {
   McpUiResourceTeardownRequest,
   McpUiResourceTeardownRequestSchema,
   McpUiResourceTeardownResult,
-  McpUiScreenshotRequest,
-  McpUiScreenshotRequestSchema,
-  McpUiScreenshotResult,
   McpUiSizeChangedNotification,
   McpUiToolCancelledNotification,
   McpUiToolCancelledNotificationSchema,
@@ -708,77 +702,6 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
     this.setRequestHandler(
       McpUiResourceTeardownRequestSchema,
       (request, extra) => callback(request.params, extra),
-    );
-  }
-
-  /**
-   * Handler for screenshot requests from the host.
-   *
-   * Set this property to register a handler that captures the current visual
-   * state of the App. The handler should render the App and return the image
-   * data as a base64-encoded string.
-   *
-   * @param callback - Async function that captures the screenshot
-   *
-   * @example Capture a screenshot of the App
-   * ```typescript
-   * app.onscreenshot = async (params, extra) => {
-   *   const canvas = await html2canvas(document.body);
-   *   const dataUrl = canvas.toDataURL(params.format ?? "image/png", params.quality);
-   *   const [mimeType, data] = dataUrl.replace("data:", "").split(";base64,");
-   *   return { data, mimeType, width: canvas.width, height: canvas.height };
-   * };
-   * ```
-   *
-   * @see {@link McpUiScreenshotRequest} for the request structure
-   * @see {@link McpUiScreenshotResult} for the result structure
-   */
-  set onscreenshot(
-    callback: (
-      params: McpUiScreenshotRequest["params"],
-      extra: RequestHandlerExtra,
-    ) => Promise<McpUiScreenshotResult>,
-  ) {
-    this.setRequestHandler(McpUiScreenshotRequestSchema, (request, extra) =>
-      callback(request.params, extra),
-    );
-  }
-
-  /**
-   * Handler for click simulation requests from the host.
-   *
-   * Set this property to register a handler that simulates a click at the
-   * specified coordinates in the App. The handler should dispatch appropriate
-   * mouse events to the target element.
-   *
-   * @param callback - Async function that simulates the click
-   *
-   * @example Handle click simulation
-   * ```typescript
-   * app.onclick = async ({ x, y, type = "click", button = "left" }, extra) => {
-   *   const element = document.elementFromPoint(x, y);
-   *   if (!element) {
-   *     return { success: false, isError: true };
-   *   }
-   *   element.dispatchEvent(new MouseEvent(type, {
-   *     clientX: x, clientY: y, bubbles: true, cancelable: true,
-   *     button: button === "left" ? 0 : button === "right" ? 2 : 1
-   *   }));
-   *   return { success: true, targetElement: element.tagName.toLowerCase() };
-   * };
-   * ```
-   *
-   * @see {@link McpUiClickRequest} for the request structure
-   * @see {@link McpUiClickResult} for the result structure
-   */
-  set onclick(
-    callback: (
-      params: McpUiClickRequest["params"],
-      extra: RequestHandlerExtra,
-    ) => Promise<McpUiClickResult>,
-  ) {
-    this.setRequestHandler(McpUiClickRequestSchema, (request, extra) =>
-      callback(request.params, extra),
     );
   }
 
