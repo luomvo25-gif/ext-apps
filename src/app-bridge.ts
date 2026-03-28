@@ -39,10 +39,10 @@ import {
   ToolListChangedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import {
-  Protocol,
   ProtocolOptions,
   RequestOptions,
 } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import { ProtocolWithEvents } from "./events";
 
 import {
   type AppNotification,
@@ -227,6 +227,23 @@ type RequestHandlerExtra = Parameters<
 >[1];
 
 /**
+ * Event name → listener `params` type for {@link AppBridge.addEventListener `AppBridge.addEventListener`}.
+ *
+ * Each key is a notification event. Calling `addEventListener` with a key
+ * appends a listener; all listeners fire in insertion order when the
+ * corresponding notification arrives from the view.
+ *
+ * @see {@link AppBridge.addEventListener `AppBridge.addEventListener`}
+ */
+export type AppBridgeEventMap = {
+  sizechange: McpUiSizeChangedNotification["params"];
+  sandboxready: McpUiSandboxProxyReadyNotification["params"];
+  initialized: McpUiInitializedNotification["params"];
+  requestteardown: McpUiRequestTeardownNotification["params"];
+  loggingmessage: LoggingMessageNotification["params"];
+};
+
+/**
  * Host-side bridge for communicating with a single View ({@link app!App `App`}).
  *
  * `AppBridge` extends the MCP SDK's `Protocol` class and acts as a proxy between
@@ -283,14 +300,23 @@ type RequestHandlerExtra = Parameters<
  * await bridge.connect(transport);
  * ```
  */
-export class AppBridge extends Protocol<
+export class AppBridge extends ProtocolWithEvents<
   AppRequest,
   AppNotification,
-  AppResult
+  AppResult,
+  AppBridgeEventMap
 > {
   private _appCapabilities?: McpUiAppCapabilities;
   private _hostContext: McpUiHostContext = {};
   private _appInfo?: Implementation;
+
+  protected readonly eventSchemas = {
+    sizechange: McpUiSizeChangedNotificationSchema,
+    sandboxready: McpUiSandboxProxyReadyNotificationSchema,
+    initialized: McpUiInitializedNotificationSchema,
+    requestteardown: McpUiRequestTeardownNotificationSchema,
+    loggingmessage: LoggingMessageNotificationSchema,
+  };
 
   /**
    * Create a new AppBridge instance.
@@ -346,10 +372,13 @@ export class AppBridge extends Protocol<
 
     // Default handler for requestDisplayMode - returns current mode from host context.
     // Hosts can override this by setting bridge.onrequestdisplaymode = ...
-    this.setRequestHandler(McpUiRequestDisplayModeRequestSchema, (request) => {
-      const currentMode = this._hostContext.displayMode ?? "inline";
-      return { mode: currentMode };
-    });
+    this.setDefaultRequestHandler(
+      McpUiRequestDisplayModeRequestSchema,
+      (request) => {
+        const currentMode = this._hostContext.displayMode ?? "inline";
+        return { mode: currentMode };
+      },
+    );
   }
 
   /**
@@ -449,9 +478,7 @@ export class AppBridge extends Protocol<
   set onsizechange(
     callback: (params: McpUiSizeChangedNotification["params"]) => void,
   ) {
-    this.setNotificationHandler(McpUiSizeChangedNotificationSchema, (n) =>
-      callback(n.params),
-    );
+    this.addEventListener("sizechange", callback);
   }
 
   /**
@@ -487,9 +514,7 @@ export class AppBridge extends Protocol<
   set onsandboxready(
     callback: (params: McpUiSandboxProxyReadyNotification["params"]) => void,
   ) {
-    this.setNotificationHandler(McpUiSandboxProxyReadyNotificationSchema, (n) =>
-      callback(n.params),
-    );
+    this.addEventListener("sandboxready", callback);
   }
 
   /**
@@ -512,9 +537,7 @@ export class AppBridge extends Protocol<
   set oninitialized(
     callback: (params: McpUiInitializedNotification["params"]) => void,
   ) {
-    this.setNotificationHandler(McpUiInitializedNotificationSchema, (n) =>
-      callback(n.params),
-    );
+    this.addEventListener("initialized", callback);
   }
 
   /**
@@ -707,10 +730,7 @@ export class AppBridge extends Protocol<
   set onrequestteardown(
     callback: (params: McpUiRequestTeardownNotification["params"]) => void,
   ) {
-    this.setNotificationHandler(
-      McpUiRequestTeardownNotificationSchema,
-      (request) => callback(request.params),
-    );
+    this.addEventListener("requestteardown", callback);
   }
 
   /**
@@ -788,12 +808,7 @@ export class AppBridge extends Protocol<
   set onloggingmessage(
     callback: (params: LoggingMessageNotification["params"]) => void,
   ) {
-    this.setNotificationHandler(
-      LoggingMessageNotificationSchema,
-      async (notification) => {
-        callback(notification.params);
-      },
-    );
+    this.addEventListener("loggingmessage", callback);
   }
 
   /**

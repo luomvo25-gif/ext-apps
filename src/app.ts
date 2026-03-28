@@ -1,9 +1,9 @@
 import {
   type RequestOptions,
   mergeCapabilities,
-  Protocol,
   ProtocolOptions,
 } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import { ProtocolWithEvents } from "./events";
 
 import {
   CallToolRequest,
@@ -173,6 +173,23 @@ type RequestHandlerExtra = Parameters<
 >[1];
 
 /**
+ * Event name → listener `params` type for {@link App.addEventListener `App.addEventListener`}.
+ *
+ * Each key is a notification event. Calling `addEventListener` with a key
+ * appends a listener; all listeners fire in insertion order when the
+ * corresponding `ui/notifications/*` message arrives.
+ *
+ * @see {@link App.addEventListener `App.addEventListener`}
+ */
+export type AppEventMap = {
+  toolinput: McpUiToolInputNotification["params"];
+  toolinputpartial: McpUiToolInputPartialNotification["params"];
+  toolresult: McpUiToolResultNotification["params"];
+  toolcancelled: McpUiToolCancelledNotification["params"];
+  hostcontextchanged: McpUiHostContextChangedNotification["params"];
+};
+
+/**
  * Main class for MCP Apps to communicate with their host.
  *
  * The `App` class provides a framework-agnostic way to build interactive MCP Apps
@@ -193,26 +210,29 @@ type RequestHandlerExtra = Parameters<
  * 3. **Interactive**: Send requests, receive notifications, call tools
  * 4. **Teardown**: Host sends teardown request before unmounting
  *
- * ## Inherited Methods
+ * ## Handler Registration
  *
- * As a subclass of `Protocol`, `App` inherits key methods for handling communication:
- * - `setRequestHandler()` - Register handlers for requests from host
- * - `setNotificationHandler()` - Register handlers for notifications from host
+ * As a subclass of `Protocol`, `App` inherits:
+ * - `setRequestHandler()` / `setNotificationHandler()` — register a single
+ *   handler per method. Calling either twice for the same method throws.
+ *
+ * For notifications, prefer {@link addEventListener `addEventListener`} /
+ * {@link removeEventListener `removeEventListener`} — these support multiple
+ * listeners per event.
  *
  * @see `Protocol` from @modelcontextprotocol/sdk for all inherited methods
  *
  * ## Notification Setters
  *
- * For common notifications, the `App` class provides convenient setter properties
- * that simplify handler registration:
+ * For common notifications, the `App` class also provides setter properties:
  * - `ontoolinput` - Complete tool arguments from host
  * - `ontoolinputpartial` - Streaming partial tool arguments
  * - `ontoolresult` - Tool execution results
  * - `ontoolcancelled` - Tool execution was cancelled by user or host
  * - `onhostcontextchanged` - Host context changes (theme, locale, etc.)
  *
- * These setters are convenience wrappers around `setNotificationHandler()`.
- * Both patterns work; use whichever fits your coding style better.
+ * These delegate to {@link addEventListener `addEventListener`}, so assigning
+ * multiple times appends listeners rather than replacing them.
  *
  * @example Basic usage with PostMessageTransport
  * ```ts source="./app.examples.ts#App_basicUsage"
@@ -229,11 +249,33 @@ type RequestHandlerExtra = Parameters<
  * await app.connect();
  * ```
  */
-export class App extends Protocol<AppRequest, AppNotification, AppResult> {
+export class App extends ProtocolWithEvents<
+  AppRequest,
+  AppNotification,
+  AppResult,
+  AppEventMap
+> {
   private _hostCapabilities?: McpUiHostCapabilities;
   private _hostInfo?: Implementation;
   private _hostContext?: McpUiHostContext;
   private _registeredTools: { [name: string]: RegisteredTool } = {};
+
+  protected readonly eventSchemas = {
+    toolinput: McpUiToolInputNotificationSchema,
+    toolinputpartial: McpUiToolInputPartialNotificationSchema,
+    toolresult: McpUiToolResultNotificationSchema,
+    toolcancelled: McpUiToolCancelledNotificationSchema,
+    hostcontextchanged: McpUiHostContextChangedNotificationSchema,
+  };
+
+  protected override onEventDispatch<K extends keyof AppEventMap>(
+    event: K,
+    params: AppEventMap[K],
+  ): void {
+    if (event === "hostcontextchanged") {
+      this._hostContext = { ...this._hostContext, ...params };
+    }
+  }
 
   /**
    * Create a new MCP App instance.
@@ -263,9 +305,10 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
       return {};
     });
 
-    // Set up default handler to update _hostContext when notifications arrive.
-    // Users can override this by setting onhostcontextchanged.
-    this.onhostcontextchanged = () => {};
+    // Eagerly register the hostcontextchanged dispatcher so that
+    // onEventDispatch merges incoming context into _hostContext even if the
+    // user never adds a listener.
+    this.addEventListener("hostcontextchanged", () => {});
   }
 
   private registerCapabilities(capabilities: McpUiAppCapabilities): void {
@@ -372,14 +415,19 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
     }
     this._toolHandlersInitialized = true;
 
-    this.oncalltool = async (params, extra) => {
-      const tool = this._registeredTools[params.name];
-      if (!tool) {
-        throw new Error(`Tool ${params.name} not found`);
-      }
-      return (tool.handler as any)(params.arguments as any, extra);
-    };
-    this.onlisttools = async (_params, _extra) => {
+    // Register via setDefaultRequestHandler so users can still override with
+    // their own oncalltool/onlisttools after calling registerTool.
+    this.setDefaultRequestHandler(
+      CallToolRequestSchema,
+      async (request, extra) => {
+        const tool = this._registeredTools[request.params.name];
+        if (!tool) {
+          throw new Error(`Tool ${request.params.name} not found`);
+        }
+        return (tool.handler as any)(request.params.arguments as any, extra);
+      },
+    );
+    this.setDefaultRequestHandler(ListToolsRequestSchema, async () => {
       const tools: Tool[] = Object.entries(this._registeredTools)
         .filter(([_, tool]) => tool.enabled)
         .map(([name, tool]) => {
@@ -408,7 +456,7 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
           return result;
         });
       return { tools };
-    };
+    });
   }
 
   async sendToolListChanged(
@@ -505,8 +553,9 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * sends a tool's complete arguments. This is sent after a tool call begins
    * and before the tool result is available.
    *
-   * This setter is a convenience wrapper around `setNotificationHandler()` that
-   * automatically handles the notification schema and extracts the params for you.
+   * This setter is a convenience wrapper around
+   * {@link addEventListener `addEventListener`} — assigning multiple times
+   * appends listeners rather than replacing them.
    *
    * Register handlers before calling {@link connect `connect`} to avoid missing notifications.
    *
@@ -522,15 +571,13 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * await app.connect();
    * ```
    *
-   * @see {@link setNotificationHandler `setNotificationHandler`} for the underlying method
+   * @see {@link addEventListener `addEventListener`} for the underlying method
    * @see {@link McpUiToolInputNotification `McpUiToolInputNotification`} for the notification structure
    */
   set ontoolinput(
     callback: (params: McpUiToolInputNotification["params"]) => void,
   ) {
-    this.setNotificationHandler(McpUiToolInputNotificationSchema, (n) =>
-      callback(n.params),
-    );
+    this.addEventListener("toolinput", callback);
   }
 
   /**
@@ -545,8 +592,9 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * (e.g., the last item in an array may be truncated). Use partial data only
    * for preview UI, not for critical operations.
    *
-   * This setter is a convenience wrapper around `setNotificationHandler()` that
-   * automatically handles the notification schema and extracts the params for you.
+   * This setter is a convenience wrapper around
+   * {@link addEventListener `addEventListener`} — assigning multiple times
+   * appends listeners rather than replacing them.
    *
    * Register handlers before calling {@link connect `connect`} to avoid missing notifications.
    *
@@ -570,16 +618,14 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * };
    * ```
    *
-   * @see {@link setNotificationHandler `setNotificationHandler`} for the underlying method
+   * @see {@link addEventListener `addEventListener`} for the underlying method
    * @see {@link McpUiToolInputPartialNotification `McpUiToolInputPartialNotification`} for the notification structure
    * @see {@link ontoolinput `ontoolinput`} for the complete tool input handler
    */
   set ontoolinputpartial(
     callback: (params: McpUiToolInputPartialNotification["params"]) => void,
   ) {
-    this.setNotificationHandler(McpUiToolInputPartialNotificationSchema, (n) =>
-      callback(n.params),
-    );
+    this.addEventListener("toolinputpartial", callback);
   }
 
   /**
@@ -589,8 +635,9 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * sends the result of a tool execution. This is sent after the tool completes
    * on the MCP server, allowing your app to display the results or update its state.
    *
-   * This setter is a convenience wrapper around `setNotificationHandler()` that
-   * automatically handles the notification schema and extracts the params for you.
+   * This setter is a convenience wrapper around
+   * {@link addEventListener `addEventListener`} — assigning multiple times
+   * appends listeners rather than replacing them.
    *
    * Register handlers before calling {@link connect `connect`} to avoid missing notifications.
    *
@@ -607,16 +654,14 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * };
    * ```
    *
-   * @see {@link setNotificationHandler `setNotificationHandler`} for the underlying method
+   * @see {@link addEventListener `addEventListener`} for the underlying method
    * @see {@link McpUiToolResultNotification `McpUiToolResultNotification`} for the notification structure
    * @see {@link ontoolinput `ontoolinput`} for the initial tool input handler
    */
   set ontoolresult(
     callback: (params: McpUiToolResultNotification["params"]) => void,
   ) {
-    this.setNotificationHandler(McpUiToolResultNotificationSchema, (n) =>
-      callback(n.params),
-    );
+    this.addEventListener("toolresult", callback);
   }
 
   /**
@@ -627,8 +672,9 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * including user action, sampling error, classifier intervention, or other
    * interruptions. Apps should update their state and display appropriate feedback.
    *
-   * This setter is a convenience wrapper around `setNotificationHandler()` that
-   * automatically handles the notification schema and extracts the params for you.
+   * This setter is a convenience wrapper around
+   * {@link addEventListener `addEventListener`} — assigning multiple times
+   * appends listeners rather than replacing them.
    *
    * Register handlers before calling {@link connect `connect`} to avoid missing notifications.
    *
@@ -642,16 +688,14 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * };
    * ```
    *
-   * @see {@link setNotificationHandler `setNotificationHandler`} for the underlying method
+   * @see {@link addEventListener `addEventListener`} for the underlying method
    * @see {@link McpUiToolCancelledNotification `McpUiToolCancelledNotification`} for the notification structure
    * @see {@link ontoolresult `ontoolresult`} for successful tool completion
    */
   set ontoolcancelled(
     callback: (params: McpUiToolCancelledNotification["params"]) => void,
   ) {
-    this.setNotificationHandler(McpUiToolCancelledNotificationSchema, (n) =>
-      callback(n.params),
-    );
+    this.addEventListener("toolcancelled", callback);
   }
 
   /**
@@ -662,8 +706,9 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * other environmental updates. Apps should respond by updating their UI
    * accordingly.
    *
-   * This setter is a convenience wrapper around `setNotificationHandler()` that
-   * automatically handles the notification schema and extracts the params for you.
+   * This setter is a convenience wrapper around
+   * {@link addEventListener `addEventListener`} — assigning multiple times
+   * appends listeners rather than replacing them.
    *
    * Notification params are automatically merged into the internal host context
    * before the callback is invoked. This means {@link getHostContext `getHostContext`} will
@@ -684,21 +729,14 @@ export class App extends Protocol<AppRequest, AppNotification, AppResult> {
    * };
    * ```
    *
-   * @see {@link setNotificationHandler `setNotificationHandler`} for the underlying method
+   * @see {@link addEventListener `addEventListener`} for the underlying method
    * @see {@link McpUiHostContextChangedNotification `McpUiHostContextChangedNotification`} for the notification structure
    * @see {@link McpUiHostContext `McpUiHostContext`} for the full context structure
    */
   set onhostcontextchanged(
     callback: (params: McpUiHostContextChangedNotification["params"]) => void,
   ) {
-    this.setNotificationHandler(
-      McpUiHostContextChangedNotificationSchema,
-      (n) => {
-        // Merge the partial update into the stored context
-        this._hostContext = { ...this._hostContext, ...n.params };
-        callback(n.params);
-      },
-    );
+    this.addEventListener("hostcontextchanged", callback);
   }
 
   /**
