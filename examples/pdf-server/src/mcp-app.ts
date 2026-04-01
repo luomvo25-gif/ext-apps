@@ -3896,11 +3896,16 @@ async function reloadPdf(): Promise<void> {
     log.info("PDF reloaded:", totalPages, "pages,", totalBytes, "bytes");
 
     showViewer();
+    // Render immediately — annotation/form scans below are O(numPages) and
+    // do NOT block the canvas. See same pattern in the initial-load path.
+    await renderPage();
+
     await loadBaselineAnnotations(document);
     await buildFieldNameMap(document);
     syncFormValuesToStorage();
     updateAnnotationsBadge();
     renderAnnotationPanel();
+
     renderPage();
     startPreloading();
   } catch (err) {
@@ -4103,9 +4108,18 @@ app.ontoolresult = async (result: CallToolResult) => {
     downloadBtn.style.display = app.getHostCapabilities()?.downloadFile
       ? ""
       : "none";
-    // Save button visibility driven by setDirty()/updateSaveBtn();
-    // restoreAnnotations() above may have already shown it via setDirty(true).
-    updateSaveBtn();
+
+    // Compute fit + render IMMEDIATELY for fast first paint. The canvas is
+    // unsized until renderPage() runs — anything async between showViewer()
+    // and here makes the empty viewer visible. The annotation/form scans
+    // below are O(numPages) and do NOT block the canvas (page.render only
+    // needs canvasContext+viewport), so they run after.
+    const fitScale = await computeFitToWidthScale();
+    if (fitScale !== null) {
+      scale = fitScale;
+      log.info("Fit-to-width scale:", scale);
+    }
+    await renderPage();
 
     // Import annotations from the PDF to establish baseline
     await loadBaselineAnnotations(document);
@@ -4118,14 +4132,12 @@ app.ontoolresult = async (result: CallToolResult) => {
     syncFormValuesToStorage();
 
     updateAnnotationsBadge();
+    // Save button visibility driven by setDirty()/updateSaveBtn();
+    // restoreAnnotations() may have just flipped it via setDirty(true).
+    updateSaveBtn();
 
-    // Compute fit-to-width scale for narrow containers (e.g. mobile)
-    const fitScale = await computeFitToWidthScale();
-    if (fitScale !== null) {
-      scale = fitScale;
-      log.info("Fit-to-width scale:", scale);
-    }
-
+    // Re-render to overlay PDF-baseline annotations + restored form values.
+    // For PDFs with neither, the canvas is identical → no flicker.
     renderPage();
     // Start background preloading of all pages for text extraction
     startPreloading();
