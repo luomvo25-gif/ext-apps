@@ -904,19 +904,22 @@ export async function buildAnnotatedPdfBytes(
           if (!field) continue;
 
           if (field instanceof PDFCheckBox) {
-            if (typeof value === "string") {
-              // A string value on a "checkbox" means pdf-lib misclassified a
-              // radio group (PDF lacks the /Ff Radio flag bit). The viewer
-              // stored pdf.js's buttonValue, which is the widget's appearance
-              // on-state name (e.g. "0"/"1"). check()/uncheck() would set the
-              // FIRST widget's on-state regardless, so write /V and per-widget
-              // /AS directly — same as PDFAcroRadioButton.setValue but without
-              // its onValues guard (which checks the first widget only).
+            const widgets = field.acroField.getWidgets();
+            if (typeof value === "string" && widgets.length > 1) {
+              // Multi-widget "checkbox" with a string value = pdf-lib
+              // misclassified a radio group (PDF lacks the /Ff Radio flag).
+              // The viewer stored pdf.js's buttonValue (the widget's on-state
+              // name, e.g. "0"/"1"); check()/uncheck() would hit the FIRST
+              // widget regardless. Write /V and per-widget /AS directly.
               setButtonGroupValue(field, value);
-            } else if (value) {
-              field.check();
             } else {
-              field.uncheck();
+              // Single-widget (real) checkbox. Viewer normally stores boolean,
+              // but be liberal: any truthy non-"Off" string counts as checked.
+              const on =
+                value === true ||
+                (typeof value === "string" && value !== "" && value !== "Off");
+              if (on) field.check();
+              else field.uncheck();
             }
           } else if (field instanceof PDFRadioGroup) {
             // The viewer stores pdf.js's buttonValue, which for PDFs with an
