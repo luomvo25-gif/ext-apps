@@ -3124,19 +3124,6 @@ async function savePdf(): Promise<void> {
       const sc = result.structuredContent as { mtimeMs?: number } | undefined;
       lastSavedMtime = sc?.mtimeMs ?? null;
 
-      // Rebase: the file on disk now contains our annotations + form values.
-      // Update the baseline so future diffs are relative to what was saved.
-      pdfBaselineAnnotations = [...annotationMap.values()].map((t) => ({
-        ...t.def,
-      }));
-      pdfBaselineFormValues.clear();
-      for (const [k, v] of formFieldValues) pdfBaselineFormValues.set(k, v);
-
-      setDirty(false); // → updateSaveBtn() disables button
-      // Panel diffs against the baselines we just rebased — re-render so the
-      // "edited" badges and pending-change list go away.
-      updateAnnotationsBadge();
-      renderAnnotationPanel();
       const key = annotationStorageKey();
       if (key) {
         try {
@@ -3145,6 +3132,13 @@ async function savePdf(): Promise<void> {
           /* ignore */
         }
       }
+      // Reload from the bytes we just wrote. The previous approach (rebase
+      // baselines but keep the old pdfDocument) drifts: subsequent renders
+      // still rasterize stripped annotations from the old bytes, and the
+      // field/widget split that pdf-lib's save can create isn't reflected
+      // until reload anyway. Reload makes "what you see = what's on disk"
+      // an invariant. (file_changed echo is suppressed by lastSavedMtime.)
+      await reloadPdf();
     }
   } catch (err) {
     log.error("Save failed:", err);
