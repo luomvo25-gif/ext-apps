@@ -25,7 +25,10 @@ import {
   type CallToolResult,
   type ReadResourceResult,
 } from "@modelcontextprotocol/sdk/types.js";
-// Use the legacy build to avoid DOMMatrix dependency in Node.js
+// Stub DOMMatrix/ImageData/Path2D before pdfjs-dist loads — its legacy
+// build instantiates DOMMatrix at module scope and the @napi-rs/canvas
+// polyfill is unreliable under npx. See ./pdfjs-polyfill.ts for details.
+import "./pdfjs-polyfill.js";
 import {
   getDocument,
   VerbosityLevel,
