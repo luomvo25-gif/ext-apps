@@ -3340,13 +3340,13 @@ function zoomIn() {
   renderPage().then(scrollSelectionIntoView);
 }
 
-async function zoomOut() {
+function zoomOut() {
   userHasZoomed = true;
-  // Fullscreen floor is fit-to-page (anything smaller is dead margin).
-  const fit =
-    currentDisplayMode === "fullscreen" ? await computeFitScale() : null;
-  const floor = fit !== null ? Math.max(ZOOM_MIN, fit) : ZOOM_MIN;
-  scale = Math.max(scale - 0.25, floor);
+  // Intentionally NOT floored at fit-to-page (unlike pinch). Hosts may
+  // overlay UI on the iframe without reporting it in safeAreaInsets, so
+  // "fit" can leave the page bottom hidden; the button is the escape hatch
+  // to shrink past it. Pinch still rubber-bands at fit (see commitPinch).
+  scale = Math.max(scale - 0.25, ZOOM_MIN);
   renderPage().then(scrollSelectionIntoView);
 }
 
