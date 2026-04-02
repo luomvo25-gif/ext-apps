@@ -831,8 +831,15 @@ function clearFieldInStorage(name: string): void {
     meta?.[0]?.defaultValue ??
     "";
   const type = meta?.find((f) => f.type)?.type;
-  const clearValue =
-    type === "checkbox" || type === "radiobutton" ? (dv ?? "Off") : (dv ?? "");
+  // Radio: per-widget BOOLEANS, never a string. pdf.js's
+  // RadioButtonWidgetAnnotation render() has inverted string coercion (see
+  // setFieldInStorage), so writing the same string to every widget checks
+  // the wrong one. {value:false} on all = nothing selected.
+  if (type === "radiobutton") {
+    for (const id of ids) storage.setValue(id, { value: false });
+    return;
+  }
+  const clearValue = type === "checkbox" ? (dv ?? "Off") : (dv ?? "");
   for (const id of ids) storage.setValue(id, { value: clearValue });
 }
 
