@@ -321,6 +321,12 @@ export function newAppBridge(
     }
   });
   iframeResizeObserver.observe(iframe);
+  // AppBridge inherits Protocol's onclose hook — chain disposal there.
+  const prevOnclose = appBridge.onclose;
+  appBridge.onclose = () => {
+    iframeResizeObserver.disconnect();
+    prevOnclose?.();
+  };
 
   // Register all handlers before calling connect(). The view can start
   // sending requests immediately after the initialization handshake, so any

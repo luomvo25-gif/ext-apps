@@ -3041,21 +3041,36 @@ async function renderPage() {
     const dpr = window.devicePixelRatio || 1;
     const ctx = canvasEl.getContext("2d")!;
 
-    // Set canvas size in pixels (scaled for retina)
+    // If we're committing a pinch (transform still on .page-wrapper),
+    // snapshot the current bitmap so we can paint a scaled placeholder
+    // while page.render() runs. Without this, setting canvasEl.width
+    // below clears the backing store → blank flash → user sees a "snap".
+    let snap: HTMLCanvasElement | null = null;
+    if (pageWrapperEl.style.transform && canvasEl.width > 0) {
+      snap = document.createElement("canvas");
+      snap.width = canvasEl.width;
+      snap.height = canvasEl.height;
+      snap.getContext("2d")!.drawImage(canvasEl, 0, 0);
+    }
+
+    // Set canvas size in pixels (scaled for retina) — clears the bitmap
     canvasEl.width = viewport.width * dpr;
     canvasEl.height = viewport.height * dpr;
 
     // Set display size in CSS pixels
     canvasEl.style.width = `${viewport.width}px`;
     canvasEl.style.height = `${viewport.height}px`;
-    // If a pinch preview transform is on .page-wrapper, drop it in the same
-    // frame as the canvas resize. Clearing earlier (in commitPinch, before
-    // the await getPage() above) snaps the page back to the old size for
-    // one frame; clearing later double-applies the scale until render ends.
+    // Drop the pinch preview transform in the same frame as the canvas
+    // resize so the size handoff is atomic.
     pageWrapperEl.style.transform = "";
 
     // Scale context for retina
     ctx.scale(dpr, dpr);
+
+    if (snap) {
+      // Stretched-but-correct-size placeholder until page.render replaces it.
+      ctx.drawImage(snap, 0, 0, viewport.width, viewport.height);
+    }
 
     // Clear and setup text layer
     textLayerEl.innerHTML = "";
@@ -3812,8 +3827,11 @@ canvasContainerEl.addEventListener(
       e.preventDefault();
       if (pinchSettleTimer === null) beginPinch();
       // exp(-deltaY * k) makes equal-magnitude in/out deltas inverse —
-      // pinch out then back lands where you started.
-      updatePinch(previewScale * Math.exp(-e.deltaY * 0.01));
+      // pinch out then back lands where you started. Clamp per event so a
+      // physical mouse wheel (deltaY ≈ ±100/notch) doesn't slam to the
+      // limit; trackpad pinch deltas are ~±1-10 so the clamp is a no-op.
+      const d = Math.max(-25, Math.min(25, e.deltaY));
+      updatePinch(previewScale * Math.exp(-d * 0.01));
       if (pinchSettleTimer) clearTimeout(pinchSettleTimer);
       // 200ms — slow trackpad pinches can leave >150ms gaps between wheel
       // events, which would commit-then-restart and feel steppy.
