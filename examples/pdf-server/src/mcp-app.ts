@@ -3805,14 +3805,17 @@ function beginPinch() {
 }
 
 function updatePinch(nextScale: number) {
-  previewScaleRaw = nextScale;
   // In fullscreen, never shrink below fit — fit-to-page is "fully visible",
-  // so anything smaller just adds dead margin. previewScaleRaw stays
-  // unclamped so the exit-to-inline check in commitPinch() still fires.
+  // so anything smaller just adds dead margin.
   const floor =
     currentDisplayMode === "fullscreen" && fitScaleAtPinchStart !== null
       ? Math.max(ZOOM_MIN, fitScaleAtPinchStart)
       : ZOOM_MIN;
+  // previewScaleRaw is the wheel handler's accumulator AND the exit-to-inline
+  // signal. It must be allowed past `floor` (so commitPinch sees < fit*0.9)
+  // but bounded so reversing direction doesn't have to unwind a huge
+  // overshoot before the visible scale moves again.
+  previewScaleRaw = Math.min(ZOOM_MAX, Math.max(floor * 0.7, nextScale));
   previewScale = Math.min(ZOOM_MAX, Math.max(floor, nextScale));
   // Transform is RELATIVE to the rendered canvas (which sits at
   // pinchStartScale), so a previewScale equal to pinchStartScale → ratio 1.
@@ -3886,7 +3889,10 @@ canvasContainerEl.addEventListener(
       // physical mouse wheel (deltaY ≈ ±100/notch) doesn't slam to the
       // limit; trackpad pinch deltas are ~±1-10 so the clamp is a no-op.
       const d = Math.max(-25, Math.min(25, e.deltaY));
-      updatePinch(previewScale * Math.exp(-d * 0.01));
+      // Drive off previewScaleRaw (not previewScale) so we can accumulate
+      // past the fit-floor and trigger exit-to-inline. previewScaleRaw is
+      // itself bounded in updatePinch() so reversal stays responsive.
+      updatePinch(previewScaleRaw * Math.exp(-d * 0.01));
       if (pinchSettleTimer) clearTimeout(pinchSettleTimer);
       // 200ms — slow trackpad pinches can leave >150ms gaps between wheel
       // events, which would commit-then-restart and feel steppy.
