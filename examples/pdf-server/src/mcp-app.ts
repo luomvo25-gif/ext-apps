@@ -3041,36 +3041,19 @@ async function renderPage() {
     const dpr = window.devicePixelRatio || 1;
     const ctx = canvasEl.getContext("2d")!;
 
-    // If we're committing a pinch (transform still on .page-wrapper),
-    // snapshot the current bitmap so we can paint a scaled placeholder
-    // while page.render() runs. Without this, setting canvasEl.width
-    // below clears the backing store → blank flash → user sees a "snap".
-    let snap: HTMLCanvasElement | null = null;
-    if (pageWrapperEl.style.transform && canvasEl.width > 0) {
-      snap = document.createElement("canvas");
-      snap.width = canvasEl.width;
-      snap.height = canvasEl.height;
-      snap.getContext("2d")!.drawImage(canvasEl, 0, 0);
-    }
-
-    // Set canvas size in pixels (scaled for retina) — clears the bitmap
+    // Set canvas size in pixels (scaled for retina)
     canvasEl.width = viewport.width * dpr;
     canvasEl.height = viewport.height * dpr;
 
     // Set display size in CSS pixels
     canvasEl.style.width = `${viewport.width}px`;
     canvasEl.style.height = `${viewport.height}px`;
-    // Drop the pinch preview transform in the same frame as the canvas
+    // Drop any pinch preview transform in the same frame as the canvas
     // resize so the size handoff is atomic.
     pageWrapperEl.style.transform = "";
 
     // Scale context for retina
     ctx.scale(dpr, dpr);
-
-    if (snap) {
-      // Stretched-but-correct-size placeholder until page.render replaces it.
-      ctx.drawImage(snap, 0, 0, viewport.width, viewport.height);
-    }
 
     // Clear and setup text layer
     textLayerEl.innerHTML = "";
@@ -3782,11 +3765,10 @@ let pinchSettleTimer: ReturnType<typeof setTimeout> | null = null;
 function beginPinch() {
   pinchStartScale = scale;
   previewScale = scale;
-  // Kill any transition so the transform snaps; transform-origin centers
-  // the zoom on the page (good enough — focal-point zoom is a lot more
-  // bookkeeping for an example viewer).
-  pageWrapperEl.style.transition = "none";
-  pageWrapperEl.style.transformOrigin = "center center";
+  // transform-origin matches the flex layout's anchor (justify-content:
+  // center, align-items: flex-start) so the preview and the committed
+  // canvas grow from the same point — otherwise the page jumps on release.
+  pageWrapperEl.style.transformOrigin = "50% 0";
 }
 
 function updatePinch(nextScale: number) {
@@ -3798,7 +3780,6 @@ function updatePinch(nextScale: number) {
 }
 
 function commitPinch() {
-  pageWrapperEl.style.transition = "";
   if (Math.abs(previewScale - scale) < 0.01) {
     // Dead-zone — no re-render. Clear here since renderPage won't run.
     pageWrapperEl.style.transform = "";
@@ -3911,7 +3892,6 @@ canvasContainerEl.addEventListener("touchcancel", () => {
   touchStartDist = 0;
   // Cancelled (call, app-switch) → revert, don't commit a half-gesture.
   pageWrapperEl.style.transform = "";
-  pageWrapperEl.style.transition = "";
   zoomLevelEl.textContent = `${Math.round(scale * 100)}%`;
 });
 
@@ -4741,12 +4721,10 @@ function handleHostContextChanged(ctx: McpUiHostContext) {
     updateFullscreenButton();
   }
 
-  // Recompute fit-to-width when container dimensions change (rotation,
-  // window resize, panel toggle). The displayMode block above already
-  // refits on inline→fullscreen so this is for everything else.
+  // ResizeObserver on canvasContainerEl drives refit on actual size change;
+  // ctx.containerDimensions is logged for debugging but isn't load-bearing.
   if (ctx.containerDimensions) {
     log.info("Container dimensions changed:", ctx.containerDimensions);
-    refitScale();
   }
 }
 
