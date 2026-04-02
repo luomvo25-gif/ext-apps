@@ -317,15 +317,30 @@ test.describe("PDF Server - Annotations", () => {
 
 /**
  * Read the most recent interact result text from the basic-host UI.
- * Expands the latest "📤 Tool Result" panel and returns the <pre> text.
+ * Waits for the result-panel count to reach `expectedCount` first —
+ * `callInteract` doesn't block, so `.last()` would otherwise race to the
+ * previous (display_pdf) panel.
  */
-async function readLastToolResult(page: Page): Promise<string> {
-  const panel = page.locator('text="📤 Tool Result"').last();
-  await expect(panel).toBeVisible({ timeout: 30000 });
-  await panel.click();
+async function readLastToolResult(
+  page: Page,
+  expectedCount: number,
+): Promise<string> {
+  const panels = page.locator('text="📤 Tool Result"');
+  await expect(panels).toHaveCount(expectedCount, { timeout: 30000 });
+  await panels.last().click();
   const pre = page.locator("pre").last();
   await expect(pre).toBeVisible({ timeout: 5000 });
   return (await pre.textContent()) ?? "";
+}
+
+/** Unwrap basic-host's `CallToolResult` JSON to the first text block. */
+function unwrapTextResult(raw: string): string {
+  const parsed = JSON.parse(raw) as {
+    content?: { type: string; text?: string }[];
+  };
+  const block = parsed.content?.find((c) => c.type === "text");
+  if (!block?.text) throw new Error(`No text block in: ${raw.slice(0, 200)}`);
+  return block.text;
 }
 
 test.describe("PDF Server - get_viewer_state", () => {
@@ -338,16 +353,15 @@ test.describe("PDF Server - get_viewer_state", () => {
     const viewUUID = await extractViewUUID(page);
 
     await callInteract(page, { viewUUID, action: "get_viewer_state" });
-    const result = await readLastToolResult(page);
+    const raw = await readLastToolResult(page, 2);
+    const state = JSON.parse(unwrapTextResult(raw));
 
-    // Basic-host renders text content blocks as JSON-ish; the viewer's reply
-    // is a JSON object — assert key fields without being brittle on
-    // surrounding chrome.
-    expect(result).toMatch(/"currentPage"\s*:\s*1/);
-    expect(result).toMatch(/"pageCount"\s*:\s*\d+/);
-    expect(result).toMatch(/"zoom"\s*:\s*\d+/);
-    expect(result).toMatch(/"displayMode"\s*:\s*"inline"/);
-    expect(result).toMatch(/"selection"\s*:\s*null/);
+    expect(state.currentPage).toBe(1);
+    expect(state.pageCount).toBeGreaterThan(1);
+    expect(typeof state.zoom).toBe("number");
+    expect(state.displayMode).toBe("inline");
+    expect(state.selection).toBeNull();
+    expect(Array.isArray(state.selectedAnnotationIds)).toBe(true);
   });
 
   test("returns selected text and bounding rect when text-layer text is selected", async ({
@@ -374,11 +388,19 @@ test.describe("PDF Server - get_viewer_state", () => {
     expect(selectedText.length).toBeGreaterThan(0);
 
     await callInteract(page, { viewUUID, action: "get_viewer_state" });
-    const result = await readLastToolResult(page);
+    const raw = await readLastToolResult(page, 2);
+    const state = JSON.parse(unwrapTextResult(raw));
 
-    expect(result).toMatch(/"selection"\s*:\s*\{/);
-    expect(result).toContain(JSON.stringify(selectedText).slice(1, -1));
-    expect(result).toMatch(/"boundingRect"\s*:\s*\{/);
-    expect(result).toMatch(/"currentPage"\s*:\s*1/);
+    expect(state.currentPage).toBe(1);
+    expect(state.selection).not.toBeNull();
+    expect(state.selection.text).toContain(selectedText);
+    expect(state.selection.boundingRect).toEqual(
+      expect.objectContaining({
+        x: expect.any(Number),
+        y: expect.any(Number),
+        width: expect.any(Number),
+        height: expect.any(Number),
+      }),
+    );
   });
 });
