@@ -549,6 +549,76 @@ describe("importPdfjsAnnotation", () => {
     expect(result!.page).toBe(2);
   });
 
+  it("imports an unsupported subtype as 'imported' (placement only)", () => {
+    // annotationType 15 = Ink, not in PDFJS_TYPE_MAP. We keep it as a
+    // placement-only "imported" record so it's listed in the panel and
+    // rendered from annotationCanvasMap instead of being dropped.
+    const ann = {
+      annotationType: 15,
+      subtype: "Ink",
+      id: "200R",
+      rect: [100, 200, 180, 260],
+    };
+    const result = importPdfjsAnnotation(ann, 3, 0);
+    expect(result).not.toBeNull();
+    expect(result!.type).toBe("imported");
+    expect(result!.page).toBe(3);
+    expect((result as any).pdfjsId).toBe("200R");
+    expect((result as any).subtype).toBe("Ink");
+    expect((result as any).width).toBeCloseTo(80);
+    expect((result as any).height).toBeCloseTo(60);
+  });
+
+  it("imports an appearance-stream stamp as 'imported' (not text-label)", () => {
+    // A Stamp with hasAppearance carries a custom visual (e.g. an image
+    // signature) that our text-label StampAnnotation can't reproduce.
+    const ann = {
+      annotationType: 13,
+      subtype: "Stamp",
+      id: "118R",
+      rect: [420, 760, 514, 792],
+      hasAppearance: true,
+      contentsObj: { str: "DRAFT" },
+    };
+    const result = importPdfjsAnnotation(ann, 1, 0);
+    expect(result!.type).toBe("imported");
+    expect((result as any).pdfjsId).toBe("118R");
+    expect((result as any).subtype).toBe("Stamp");
+  });
+
+  it("computeDiff: 'imported' present in both baseline and current → no diff", () => {
+    const imp: PdfAnnotationDef = {
+      type: "imported",
+      id: "pdf-118R",
+      page: 1,
+      x: 420,
+      y: 760,
+      width: 94,
+      height: 32,
+      pdfjsId: "118R",
+      subtype: "Stamp",
+    };
+    const diff = computeDiff([imp], [imp], new Map());
+    expect(diff.added).toHaveLength(0);
+    expect(diff.removed).toHaveLength(0);
+  });
+
+  it("computeDiff: deleting an 'imported' annotation lists it in removed", () => {
+    const imp: PdfAnnotationDef = {
+      type: "imported",
+      id: "pdf-118R",
+      page: 1,
+      x: 420,
+      y: 760,
+      width: 94,
+      height: 32,
+      pdfjsId: "118R",
+      subtype: "Stamp",
+    };
+    const diff = computeDiff([imp], [], new Map());
+    expect(diff.removed).toEqual(["pdf-118R"]);
+  });
+
   it("imports a note (Text) annotation", () => {
     const ann = {
       annotationType: 1,

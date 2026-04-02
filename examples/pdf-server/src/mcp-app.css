@@ -590,6 +590,21 @@ body {
   user-select: none;
 }
 
+/* Annotation imported verbatim from the PDF (Stamp/Ink/etc. via
+ * annotationCanvasMap). The body is the rasterized appearance canvas;
+ * if pdf.js didn't divert it (no hasOwnCanvas), the box stays transparent
+ * over the main-canvas pixel and just captures clicks. */
+.annotation-imported {
+  position: absolute;
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+}
+.annotation-imported:hover {
+  outline: 1px dashed var(--accent, #2563eb);
+  outline-offset: 1px;
+}
+
 /* Selection visuals */
 .annotation-selected {
   outline: 2px solid var(--accent, #2563eb);

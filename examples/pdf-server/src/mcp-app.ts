@@ -25,6 +25,7 @@ import {
   type LineAnnotation,
   type StampAnnotation,
   type ImageAnnotation,
+  type ImportedAnnotation,
   type NoteAnnotation,
   type FreetextAnnotation,
   cssColorToRgb,
@@ -1383,6 +1384,10 @@ const DRAGGABLE_TYPES = new Set<string>([
   "stamp",
   "note",
   "image",
+  // "imported" is draggable in the UI but the move does NOT persist to the
+  // PDF on save (addAnnotationDicts skips it). Resize/rotate stay disabled
+  // — the appearance bitmap would just stretch.
+  "imported",
 ]);
 
 function setupAnnotationInteraction(
@@ -1890,6 +1895,25 @@ function paintAnnotationsOnCanvas(
         }
         break;
       }
+
+      case "imported": {
+        const s = pdfRectToScreen(
+          { x: def.x, y: def.y, width: def.width, height: def.height },
+          viewport,
+        );
+        const bmp = annotationCanvasMap.get(def.pdfjsId);
+        ctx.save();
+        if (bmp) {
+          ctx.drawImage(bmp, s.left, s.top, s.width, s.height);
+        } else {
+          ctx.strokeStyle = "#666";
+          ctx.lineWidth = 1;
+          ctx.setLineDash([3, 3]);
+          ctx.strokeRect(s.left, s.top, s.width, s.height);
+        }
+        ctx.restore();
+        break;
+      }
     }
   }
 }
@@ -1987,6 +2011,8 @@ function renderAnnotation(
       return [renderLineAnnotation(def, viewport)];
     case "image":
       return [renderImageAnnotation(def, viewport)];
+    case "imported":
+      return [renderImportedAnnotation(def, viewport)];
   }
 }
 
@@ -2171,6 +2197,45 @@ function renderImageAnnotation(
     img.style.pointerEvents = "none";
     img.draggable = false;
     el.appendChild(img);
+  }
+  return el;
+}
+
+/**
+ * Per-annotation appearance bitmaps from page.render(). Keyed by pdf.js
+ * annotation id (e.g. "118R"). Populated for the current page only —
+ * cleared at the start of each renderPage().
+ */
+const annotationCanvasMap = new Map<string, HTMLCanvasElement>();
+
+function renderImportedAnnotation(
+  def: ImportedAnnotation,
+  viewport: { width: number; height: number; scale: number },
+): HTMLElement {
+  const screen = pdfRectToScreen(
+    { x: def.x, y: def.y, width: def.width, height: def.height },
+    viewport,
+  );
+  const el = document.createElement("div");
+  el.className = "annotation-imported";
+  el.style.left = `${screen.left}px`;
+  el.style.top = `${screen.top}px`;
+  el.style.width = `${screen.width}px`;
+  el.style.height = `${screen.height}px`;
+  el.title = `${def.subtype} (from PDF)`;
+
+  // page.render() may or may not have produced a separate canvas for this
+  // annotation (hasOwnCanvas depends on the PDF's flags). When it did, use
+  // it as a pixel-faithful body; when it didn't, the appearance is on the
+  // main canvas already, so leave the box transparent — it still captures
+  // clicks for select/delete.
+  const canvas = annotationCanvasMap.get(def.pdfjsId);
+  if (canvas) {
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.style.display = "block";
+    canvas.style.pointerEvents = "none";
+    el.appendChild(canvas);
   }
   return el;
 }
@@ -3166,11 +3231,21 @@ async function renderPage() {
     // Set --scale-factor so CSS font-size/transform rules work correctly.
     textLayerEl.style.setProperty("--scale-factor", `${scale}`);
 
-    // Render canvas - track the task so we can cancel it
+    // Render canvas - track the task so we can cancel it.
+    //
+    // annotationCanvasMap: pdf.js diverts annotations whose appearance needs
+    // its own bitmap (Stamp/Ink/FreeText/etc. with hasOwnCanvas) into
+    // per-id canvases instead of compositing onto the main canvas.
+    // renderImportedAnnotation() pulls from this map so those annotations
+    // become movable DOM elements with pixel-faithful visuals — instead of
+    // unselectable canvas pixels (the old "ghost annotation" problem) or
+    // our lossy text-label re-render.
+    annotationCanvasMap.clear();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const renderTask = (page.render as any)({
       canvasContext: ctx,
       viewport,
+      annotationCanvasMap,
     });
     currentRenderTask = renderTask;
 

@@ -338,6 +338,8 @@ export function getAnnotationLabel(def: PdfAnnotationDef): string {
       return "Line";
     case "image":
       return "Image";
+    case "imported":
+      return `${def.subtype} (from PDF)`;
   }
 }
 
@@ -381,6 +383,8 @@ export function getAnnotationColor(def: PdfAnnotationDef): string {
       return "#333";
     case "image":
       return "#999";
+    case "imported":
+      return "#666";
   }
 }
 
