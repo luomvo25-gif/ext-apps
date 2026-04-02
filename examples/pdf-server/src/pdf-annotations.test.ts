@@ -864,7 +864,10 @@ describe("buildAnnotatedPdfBytes", () => {
 
     // Now remove the first one by ref.
     const stripped = await buildAnnotatedPdfBytes(seeded, [], new Map(), [
-      { objectNumber: ref0.objectNumber, generationNumber: ref0.generationNumber },
+      {
+        objectNumber: ref0.objectNumber,
+        generationNumber: ref0.generationNumber,
+      },
     ]);
     const strippedDoc = await PDFDocument.load(stripped);
     const remaining = strippedDoc.getPage(0).node.Annots();

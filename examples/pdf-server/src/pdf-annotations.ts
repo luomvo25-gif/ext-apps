@@ -1123,8 +1123,7 @@ export function importPdfjsAnnotation(
   // a placement-only record that the renderer fills with the rasterized
   // appearance from pdf.js's annotationCanvasMap. This keeps Ink, Polygon,
   // image-signature stamps, etc. visible AND selectable in our layer.
-  const importAsBitmap =
-    !ourType || (ourType === "stamp" && ann.hasAppearance);
+  const importAsBitmap = !ourType || (ourType === "stamp" && ann.hasAppearance);
   if (importAsBitmap) {
     if (!ann.rect) return null;
     const r = pdfjsRectToRect(ann.rect);
