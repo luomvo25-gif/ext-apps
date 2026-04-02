@@ -260,14 +260,15 @@ let userHasZoomed = false;
 
 /**
  * Compute a scale that fits the PDF page width to the available container
- * width, capped at 1.0 (we shrink to fit narrow viewports but don't blow up
- * past natural size). Returns null only when the container hasn't laid out yet.
+ * width. Returns null only when the container hasn't laid out yet.
  *
- * The cap-at-1.0 (vs the old `return null` when already-fits) is what makes
- * inline→fullscreen refit work: inline shrinks to ~0.6, fullscreen container
- * is wider than the natural page, this returns 1.0, the containerDimensions
- * handler sees 1.0 ≠ 0.6 and re-renders. With the old null return the handler
- * bailed and the cramped inline scale stuck.
+ * Inline mode caps at 1.0 — we shrink to fit a narrow chat column but don't
+ * blow up past natural size (the iframe sizes itself to the page via
+ * sendSizeChanged, so growing past 1.0 would just make the iframe huge).
+ *
+ * Fullscreen mode caps at ZOOM_MAX — the iframe is fixed to the viewport and
+ * a 612pt page at 1.0 leaves acres of empty space on a wide screen.
+ * "Fit" here means "fill the width", not "don't overflow".
  */
 async function computeFitToWidthScale(): Promise<number | null> {
   if (!pdfDocument) return null;
@@ -285,7 +286,8 @@ async function computeFitToWidthScale(): Promise<number | null> {
 
     if (availableWidth <= 0 || pageWidth <= 0) return null;
 
-    return Math.min(1.0, availableWidth / pageWidth);
+    const cap = currentDisplayMode === "fullscreen" ? ZOOM_MAX : 1.0;
+    return Math.min(cap, availableWidth / pageWidth);
   } catch {
     return null;
   }
@@ -4674,14 +4676,16 @@ function handleHostContextChanged(ctx: McpUiHostContext) {
     if (panelState.open) {
       setAnnotationPanelOpen(true);
     }
-    if (wasFullscreen && !isFullscreen && pdfDocument) {
-      // Exiting fullscreen → ask host to shrink iframe back to content size
-      requestFitToContent();
-    } else if (!wasFullscreen && isFullscreen) {
-      // Entering fullscreen → drop the cramped inline scale. We can't rely on
-      // ctx.containerDimensions arriving in this same update — some hosts
-      // send displayMode alone — so trigger refit explicitly.
-      refitToWidth();
+    if (wasFullscreen !== isFullscreen) {
+      // Mode changed → refit. computeFitToWidthScale reads displayMode, so
+      // this scales UP to fill on enter and back DOWN to ≤1.0 on exit.
+      // refitToWidth → renderPage → requestFitToContent handles the
+      // host-resize on exit. If userHasZoomed, refit no-ops; on exit fall
+      // back to requestFitToContent so the iframe still shrinks to whatever
+      // scale the user left it at.
+      void refitToWidth().then(() => {
+        if (!isFullscreen && userHasZoomed) requestFitToContent();
+      });
     }
     updateFullscreenButton();
   }
