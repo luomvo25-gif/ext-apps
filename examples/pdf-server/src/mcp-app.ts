@@ -3593,6 +3593,10 @@ formLayerEl.addEventListener("input", (e) => {
     if (!target.checked) return; // unchecking siblings — ignore
     const wid = target.getAttribute("data-element-id");
     value = (wid && radioButtonValues.get(wid)) ?? target.value;
+  } else if (target instanceof HTMLSelectElement && target.multiple) {
+    // .value on a <select multiple> is only the first option; join them all
+    // so save can select() the full set on a PDFOptionList.
+    value = Array.from(target.selectedOptions, (o) => o.value).join(",");
   } else {
     value = target.value;
   }
