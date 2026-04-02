@@ -128,6 +128,8 @@ let pdfDocument: pdfjsLib.PDFDocumentProxy | null = null;
 let currentPage = 1;
 let totalPages = 0;
 let scale = 1.0;
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 3.0;
 let pdfUrl = "";
 let pdfTitle: string | undefined;
 let viewUUID: string | undefined;
@@ -209,6 +211,7 @@ const searchCloseBtn = document.getElementById(
 ) as HTMLButtonElement;
 const highlightLayerEl = document.getElementById("highlight-layer")!;
 const annotationLayerEl = document.getElementById("annotation-layer")!;
+const pageWrapperEl = document.querySelector(".page-wrapper") as HTMLElement;
 // formLayerEl → imported from ./viewer-state.js
 const saveBtn = document.getElementById("save-btn") as HTMLButtonElement;
 const downloadBtn = document.getElementById(
@@ -256,8 +259,15 @@ let currentDisplayMode: "inline" | "fullscreen" = "inline";
 let userHasZoomed = false;
 
 /**
- * Compute a scale that fits the PDF page width to the available container width.
- * Returns null if the container isn't visible or the page width is unavailable.
+ * Compute a scale that fits the PDF page width to the available container
+ * width, capped at 1.0 (we shrink to fit narrow viewports but don't blow up
+ * past natural size). Returns null only when the container hasn't laid out yet.
+ *
+ * The cap-at-1.0 (vs the old `return null` when already-fits) is what makes
+ * inline→fullscreen refit work: inline shrinks to ~0.6, fullscreen container
+ * is wider than the natural page, this returns 1.0, the containerDimensions
+ * handler sees 1.0 ≠ 0.6 and re-renders. With the old null return the handler
+ * bailed and the cramped inline scale stuck.
  */
 async function computeFitToWidthScale(): Promise<number | null> {
   if (!pdfDocument) return null;
@@ -274,11 +284,25 @@ async function computeFitToWidthScale(): Promise<number | null> {
     const availableWidth = container.clientWidth - paddingLeft - paddingRight;
 
     if (availableWidth <= 0 || pageWidth <= 0) return null;
-    if (availableWidth >= pageWidth) return null; // Already fits
 
-    return availableWidth / pageWidth;
+    return Math.min(1.0, availableWidth / pageWidth);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Re-apply fit-to-width if the user hasn't taken over zoom. Called on
+ * container resize and on display-mode transitions where the available
+ * width changes underneath us.
+ */
+async function refitToWidth(): Promise<void> {
+  if (!pdfDocument || userHasZoomed) return;
+  const fitScale = await computeFitToWidthScale();
+  if (fitScale !== null && Math.abs(fitScale - scale) > 0.01) {
+    scale = fitScale;
+    log.info("Refit-to-width scale:", scale);
+    renderPage();
   }
 }
 
@@ -303,13 +327,9 @@ function requestFitToContent() {
   }
 
   // Get actual element dimensions
-  const canvasContainerEl = document.querySelector(
-    ".canvas-container",
-  ) as HTMLElement;
-  const pageWrapperEl = document.querySelector(".page-wrapper") as HTMLElement;
   const toolbarEl = document.querySelector(".toolbar") as HTMLElement;
 
-  if (!canvasContainerEl || !toolbarEl || !pageWrapperEl) {
+  if (!toolbarEl) {
     return;
   }
 
@@ -3249,20 +3269,25 @@ function scrollSelectionIntoView(): void {
 
 function zoomIn() {
   userHasZoomed = true;
-  scale = Math.min(scale + 0.25, 3.0);
+  scale = Math.min(scale + 0.25, ZOOM_MAX);
   renderPage().then(scrollSelectionIntoView);
 }
 
 function zoomOut() {
   userHasZoomed = true;
-  scale = Math.max(scale - 0.25, 0.5);
+  scale = Math.max(scale - 0.25, ZOOM_MIN);
   renderPage().then(scrollSelectionIntoView);
 }
 
 function resetZoom() {
   userHasZoomed = false;
-  scale = 1.0;
-  renderPage().then(scrollSelectionIntoView);
+  // Re-fit rather than blindly snapping to 1.0 — in a narrow inline iframe
+  // 1.0 overflows, in fullscreen 1.0 is what we want. computeFitToWidthScale
+  // returns min(1.0, fit) so this does the right thing in both.
+  computeFitToWidthScale().then((fitScale) => {
+    scale = fitScale ?? 1.0;
+    renderPage().then(scrollSelectionIntoView);
+  });
 }
 
 async function toggleFullscreen() {
@@ -3666,6 +3691,56 @@ document.addEventListener("selectionchange", () => {
   }, 300);
 });
 
+// --- Pinch zoom (fullscreen only) ---
+//
+// Covers two input paths:
+//   1. wheel + ctrlKey  → trackpad pinch on macOS Safari/Chrome/FF and
+//                         Windows precision touchpads. The browser synthesizes
+//                         these on pinch; deltaY < 0 is zoom-in.
+//   2. two-finger touch → mobile Safari / Chrome Android. We track the
+//                         distance between the two touches and scale by the
+//                         ratio against the initial distance.
+//
+// Both paths apply a CSS transform to .page-wrapper for live feedback (GPU,
+// no canvas re-render per frame), then commit to a real renderPage() once
+// the gesture settles. renderPage() is heavy (PDF.js page.render → canvas,
+// TextLayer, AnnotationLayer all rebuilt) — way too slow for touchmove.
+
+/** Scale at gesture start. The CSS transform is relative to the rendered
+ *  canvas, so previewScale / pinchStartScale is what we paint. */
+let pinchStartScale = 1.0;
+/** What we'd commit to if the gesture ended right now. */
+let previewScale = 1.0;
+/** Debounce timer — wheel events have no end event, so we wait for quiet. */
+let pinchSettleTimer: ReturnType<typeof setTimeout> | null = null;
+
+function beginPinch() {
+  pinchStartScale = scale;
+  previewScale = scale;
+  // Kill any transition so the transform snaps; transform-origin centers
+  // the zoom on the page (good enough — focal-point zoom is a lot more
+  // bookkeeping for an example viewer).
+  pageWrapperEl.style.transition = "none";
+  pageWrapperEl.style.transformOrigin = "center center";
+}
+
+function updatePinch(nextScale: number) {
+  previewScale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, nextScale));
+  // Transform is RELATIVE to the rendered canvas (which sits at
+  // pinchStartScale), so a previewScale equal to pinchStartScale → ratio 1.
+  pageWrapperEl.style.transform = `scale(${previewScale / pinchStartScale})`;
+  zoomLevelEl.textContent = `${Math.round(previewScale * 100)}%`;
+}
+
+function commitPinch() {
+  pageWrapperEl.style.transform = "";
+  pageWrapperEl.style.transition = "";
+  if (Math.abs(previewScale - scale) < 0.01) return; // dead-zone, no-op
+  userHasZoomed = true;
+  scale = previewScale;
+  renderPage().then(scrollSelectionIntoView);
+}
+
 // Horizontal scroll/swipe to change pages (disabled when zoomed)
 let horizontalScrollAccumulator = 0;
 const SCROLL_THRESHOLD = 50;
@@ -3674,6 +3749,23 @@ canvasContainerEl.addEventListener(
   "wheel",
   (event) => {
     const e = event as WheelEvent;
+
+    // Trackpad pinch arrives as wheel with ctrlKey set (Chrome/FF/Edge on
+    // macOS+Windows, Safari on macOS). MUST check before the deltaX/deltaY
+    // comparison below — pinch deltas come through on deltaY.
+    if (e.ctrlKey && currentDisplayMode === "fullscreen") {
+      e.preventDefault();
+      if (pinchSettleTimer === null) beginPinch();
+      // exp(-deltaY * k) makes equal-magnitude in/out deltas inverse —
+      // pinch out then back lands where you started.
+      updatePinch(previewScale * Math.exp(-e.deltaY * 0.01));
+      if (pinchSettleTimer) clearTimeout(pinchSettleTimer);
+      pinchSettleTimer = setTimeout(() => {
+        pinchSettleTimer = null;
+        commitPinch();
+      }, 150);
+      return;
+    }
 
     // Only intercept horizontal scroll, let vertical scroll through
     if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
@@ -3694,6 +3786,59 @@ canvasContainerEl.addEventListener(
   },
   { passive: false },
 );
+
+// Two-finger touch pinch. We listen on the container (not page-wrapper)
+// because the wrapper transforms during the gesture and would shift the
+// touch target out from under the fingers.
+let touchStartDist = 0;
+
+function touchDist(t: TouchList): number {
+  const dx = t[0].clientX - t[1].clientX;
+  const dy = t[0].clientY - t[1].clientY;
+  return Math.hypot(dx, dy);
+}
+
+canvasContainerEl.addEventListener(
+  "touchstart",
+  (event) => {
+    const e = event as TouchEvent;
+    if (e.touches.length !== 2 || currentDisplayMode !== "fullscreen") return;
+    // No preventDefault here — keep iOS Safari happy. We block native
+    // pinch-zoom via touch-action CSS + preventDefault on touchmove.
+    touchStartDist = touchDist(e.touches);
+    if (touchStartDist > 0) beginPinch();
+  },
+  { passive: true },
+);
+
+canvasContainerEl.addEventListener(
+  "touchmove",
+  (event) => {
+    const e = event as TouchEvent;
+    if (e.touches.length !== 2 || touchStartDist === 0) return;
+    e.preventDefault(); // stop the browser zooming the whole viewport
+    updatePinch(pinchStartScale * (touchDist(e.touches) / touchStartDist));
+  },
+  { passive: false },
+);
+
+canvasContainerEl.addEventListener("touchend", (event) => {
+  const e = event as TouchEvent;
+  // Gesture ends when we drop below two fingers. e.touches is the
+  // REMAINING set — lifting one of two leaves length 1.
+  if (touchStartDist === 0 || e.touches.length >= 2) return;
+  touchStartDist = 0;
+  commitPinch();
+});
+
+canvasContainerEl.addEventListener("touchcancel", () => {
+  if (touchStartDist === 0) return;
+  touchStartDist = 0;
+  // Cancelled (call, app-switch) → revert, don't commit a half-gesture.
+  pageWrapperEl.style.transform = "";
+  pageWrapperEl.style.transition = "";
+  zoomLevelEl.textContent = `${Math.round(scale * 100)}%`;
+});
 
 // Parse tool result
 function parseToolResult(result: CallToolResult): {
@@ -4493,19 +4638,10 @@ function handleHostContextChanged(ctx: McpUiHostContext) {
     mainEl.style.paddingLeft = `${left}px`;
   }
 
-  // Recompute fit-to-width when container dimensions change
-  if (ctx.containerDimensions && pdfDocument && !userHasZoomed) {
-    log.info("Container dimensions changed:", ctx.containerDimensions);
-    computeFitToWidthScale().then((fitScale) => {
-      if (fitScale !== null && Math.abs(fitScale - scale) > 0.01) {
-        scale = fitScale;
-        log.info("Recomputed fit-to-width scale:", scale);
-        renderPage();
-      }
-    });
-  }
-
-  // Handle display mode changes
+  // Display-mode handling MUST run before the fit-to-width recompute below.
+  // Toggling .fullscreen flips `padding: 0 !important` on mainEl, which
+  // changes how much width the canvas-container actually gets. Measuring
+  // before the class lands sees the wrong padding.
   if (ctx.displayMode) {
     const wasFullscreen = currentDisplayMode === "fullscreen";
     currentDisplayMode = ctx.displayMode as "inline" | "fullscreen";
@@ -4516,11 +4652,24 @@ function handleHostContextChanged(ctx: McpUiHostContext) {
     if (panelState.open) {
       setAnnotationPanelOpen(true);
     }
-    // When exiting fullscreen, request resize to fit content
     if (wasFullscreen && !isFullscreen && pdfDocument) {
+      // Exiting fullscreen → ask host to shrink iframe back to content size
       requestFitToContent();
+    } else if (!wasFullscreen && isFullscreen) {
+      // Entering fullscreen → drop the cramped inline scale. We can't rely on
+      // ctx.containerDimensions arriving in this same update — some hosts
+      // send displayMode alone — so trigger refit explicitly.
+      refitToWidth();
     }
     updateFullscreenButton();
+  }
+
+  // Recompute fit-to-width when container dimensions change (rotation,
+  // window resize, panel toggle). The displayMode block above already
+  // refits on inline→fullscreen so this is for everything else.
+  if (ctx.containerDimensions) {
+    log.info("Container dimensions changed:", ctx.containerDimensions);
+    refitToWidth();
   }
 }
 
@@ -4533,6 +4682,10 @@ app.onteardown = async () => {
   if (searchDebounceTimer) {
     clearTimeout(searchDebounceTimer);
     searchDebounceTimer = null;
+  }
+  if (pinchSettleTimer) {
+    clearTimeout(pinchSettleTimer);
+    pinchSettleTimer = null;
   }
   return {};
 };

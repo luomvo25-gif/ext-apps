@@ -326,6 +326,10 @@ body {
 .main.fullscreen .canvas-container {
   min-height: 0; /* Allow flex item to shrink below content size */
   overflow: auto; /* Scroll within the document area only */
+  /* Let JS own pinch-zoom (we re-render the PDF, not the viewport).
+   * pan-x pan-y keeps native scrolling/panning working. iOS Safari only
+   * partially honours this — preventDefault on touchmove backs it up. */
+  touch-action: pan-x pan-y;
 }
 
 /* Search Button */
