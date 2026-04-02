@@ -21,7 +21,9 @@ import {
   PDFTextField,
   PDFCheckBox,
   PDFDropdown,
+  PDFOptionList,
   PDFRadioGroup,
+  type PDFForm,
 } from "pdf-lib";
 
 // =============================================================================
@@ -801,6 +803,40 @@ export async function addAnnotationDicts(
 }
 
 /**
+ * Select a radio-style button group by widget on-value, bypassing pdf-lib's
+ * type-level guards. Used when pdf-lib classifies a radio as `PDFCheckBox`
+ * (PDF lacks the /Ff Radio bit) — `check()` would always pick the first
+ * widget. Mirrors `PDFAcroRadioButton.setValue` minus its `onValues` throw.
+ */
+function setButtonGroupValue(
+  field: PDFCheckBox | PDFRadioGroup,
+  onValue: string,
+): void {
+  const acro = field.acroField;
+  const off = PDFName.of("Off");
+  const widgets = acro.getWidgets();
+  // Match by PDFName identity (pdf-lib interns names) — the viewer stored
+  // pdf.js's buttonValue, which IS the widget's /AP /N on-state name.
+  let target = onValue && onValue !== "Off" ? PDFName.of(onValue) : off;
+  if (
+    target !== off &&
+    !widgets.some((w: { getOnValue(): PDFName | undefined }) => {
+      return w.getOnValue() === target;
+    })
+  ) {
+    // No widget has this on-state — leave as-is rather than corrupt /V.
+    return;
+  }
+  acro.dict.set(PDFName.of("V"), target);
+  for (const w of widgets) {
+    const on = (w as { getOnValue(): PDFName | undefined }).getOnValue();
+    (w as { setAppearanceState(s: PDFName): void }).setAppearanceState(
+      on === target ? target : off,
+    );
+  }
+}
+
+/**
  * Build annotated PDF bytes from the original document.
  * Applies user annotations and form fills, returns Uint8Array of the new PDF.
  */
@@ -815,44 +851,96 @@ export async function buildAnnotatedPdfBytes(
   await addAnnotationDicts(pdfDoc, annotations);
 
   // Apply form fills. Dispatch on actual field type — getTextField(name) throws
-  // for dropdowns/radios, so the old try/catch silently dropped those on save.
+  // for dropdowns/radios, so we look up the generic field and instanceof it.
+  // Each field is wrapped in its own try/catch: pdf-lib can throw on
+  // length-constrained text, radios whose buttonValue maps to neither label
+  // nor index, checkboxes missing a /Yes appearance, etc. One bad field must
+  // not abort the rest of the loop (regressed in #577 when the inner catch
+  // was dropped along with the type-specific getters).
   if (formFields.size > 0) {
+    let form: PDFForm | undefined;
     try {
-      const form = pdfDoc.getForm();
-      for (const [name, value] of formFields) {
-        const field = form.getFieldMaybe(name);
-        if (!field) continue;
-
-        if (field instanceof PDFCheckBox) {
-          if (value) field.check();
-          else field.uncheck();
-        } else if (field instanceof PDFRadioGroup) {
-          // The viewer stores pdf.js's buttonValue, which for PDFs with an
-          // /Opt array is a numeric index ("0","1","2") rather than the
-          // option label pdf-lib's select() expects. Try the label first,
-          // then fall back to indexing into getOptions().
-          const opts = field.getOptions();
-          const s = String(value);
-          if (opts.includes(s)) {
-            field.select(s);
-          } else {
-            const idx = Number(s);
-            if (Number.isInteger(idx) && idx >= 0 && idx < opts.length) {
-              field.select(opts[idx]);
-            }
-            // else: value is neither label nor index — leave unset
-          }
-        } else if (field instanceof PDFDropdown) {
-          // select() auto-enables edit mode for values outside getOptions(),
-          // so this works for both enumerated and free-text combos.
-          field.select(String(value));
-        } else if (field instanceof PDFTextField) {
-          field.setText(String(value));
-        }
-        // PDFButton, PDFOptionList, PDFSignature: no fill_form support yet
-      }
+      form = pdfDoc.getForm();
     } catch {
-      // pdfDoc.getForm() throws if the PDF has no AcroForm
+      // No AcroForm in this PDF
+    }
+    if (form) {
+      for (const [name, value] of formFields) {
+        try {
+          const field = form.getFieldMaybe(name);
+          if (!field) continue;
+
+          if (field instanceof PDFCheckBox) {
+            const widgets = field.acroField.getWidgets();
+            if (typeof value === "string" && widgets.length > 1) {
+              // Multi-widget "checkbox" with a string value = pdf-lib
+              // misclassified a radio group (PDF lacks the /Ff Radio flag).
+              // The viewer stored pdf.js's buttonValue (the widget's on-state
+              // name, e.g. "0"/"1"); check()/uncheck() would hit the FIRST
+              // widget regardless. Write /V and per-widget /AS directly.
+              setButtonGroupValue(field, value);
+            } else {
+              // Single-widget (real) checkbox. Viewer normally stores boolean,
+              // but be liberal: any truthy non-"Off" string counts as checked.
+              const on =
+                value === true ||
+                (typeof value === "string" && value !== "" && value !== "Off");
+              if (on) field.check();
+              else field.uncheck();
+            }
+          } else if (field instanceof PDFRadioGroup) {
+            // The viewer stores pdf.js's buttonValue, which for PDFs with an
+            // /Opt array is a numeric index ("0","1","2") rather than the
+            // option label pdf-lib's select() expects. Try the label first,
+            // then fall back to indexing into getOptions().
+            const opts = field.getOptions();
+            const s = String(value);
+            if (opts.includes(s)) {
+              field.select(s);
+            } else {
+              const idx = Number(s);
+              if (Number.isInteger(idx) && idx >= 0 && idx < opts.length) {
+                field.select(opts[idx]);
+              }
+              // else: value is neither label nor index — leave unset
+            }
+          } else if (field instanceof PDFDropdown) {
+            // select() auto-enables edit mode for values outside getOptions(),
+            // so this works for both enumerated and free-text combos.
+            field.select(String(value));
+          } else if (field instanceof PDFOptionList) {
+            // Viewer stores multiselect listboxes as a comma-joined string
+            // (pdf.js's annotationStorage value for /Ch is string|string[];
+            // our Map<string,string|boolean> flattens arrays). Only select
+            // values that are actually in the option list — pdf-lib throws
+            // on unknowns and there's no edit-mode fallback like Dropdown.
+            const opts = field.getOptions();
+            const wanted = String(value)
+              .split(",")
+              .map((s) => s.trim())
+              .filter((s) => opts.includes(s));
+            if (wanted.length > 0) field.select(wanted);
+            else field.clear();
+          } else if (field instanceof PDFTextField) {
+            field.setText(String(value));
+          }
+          // PDFButton, PDFSignature: no fill_form support yet
+        } catch (err) {
+          // Skip this field; carry on with the rest. Surfacing per-field
+          // failures is the caller's job (see fill_form result), not save's.
+          console.warn(`buildAnnotatedPdfBytes: skipped field "${name}":`, err);
+        }
+      }
+      // Some PDFs ship widgets with no on-state appearance stream (no
+      // /AP/N/<onValue>). pdf-lib's check()/select()/setText() set /V and /AS
+      // but don't synthesize the missing appearance, so other readers
+      // (Preview, Acrobat) show the field as if unchanged. This generates a
+      // default appearance for any field marked dirty above.
+      try {
+        form.updateFieldAppearances();
+      } catch (err) {
+        console.warn("buildAnnotatedPdfBytes: updateFieldAppearances:", err);
+      }
     }
   }
 

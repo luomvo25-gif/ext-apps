@@ -2971,15 +2971,23 @@ async function getAnnotatedPdfBytes(): Promise<Uint8Array> {
     }
   }
 
-  // buildAnnotatedPdfBytes gates on formFields.size > 0 and only writes
-  // entries present in the map. After clearAllItems() the map is empty →
-  // zero setText/uncheck calls → pdf-lib leaves original /V intact →
-  // the "stripped PDF" we promised keeps all its form data. To actually
-  // clear, send an explicit sentinel for every baseline field the user
-  // dropped: "" for text, false for checkbox (matching baseline type).
-  const formFieldsOut = new Map(formFieldValues);
+  // Only write fields that actually changed vs. what's already in the PDF.
+  // Unchanged fields are no-ops at best, and at worst trip pdf-lib edge
+  // cases (max-length text, missing /Yes appearance, …) on fields the user
+  // never touched — which, before the per-field catch in
+  // buildAnnotatedPdfBytes, aborted every subsequent field.
+  //
+  // Fields the user cleared (present in baseline, absent from formFieldValues
+  // after clearAllItems()) still need an explicit "" / false so pdf-lib
+  // overwrites the original /V instead of leaving it intact.
+  const formFieldsOut = new Map<string, string | boolean>();
+  for (const [name, value] of formFieldValues) {
+    if (pdfBaselineFormValues.get(name) !== value) {
+      formFieldsOut.set(name, value);
+    }
+  }
   for (const [name, baselineValue] of pdfBaselineFormValues) {
-    if (!formFieldsOut.has(name)) {
+    if (!formFieldValues.has(name)) {
       formFieldsOut.set(name, typeof baselineValue === "boolean" ? false : "");
     }
   }
@@ -3499,6 +3507,10 @@ formLayerEl.addEventListener("input", (e) => {
     if (!target.checked) return; // unchecking siblings — ignore
     const wid = target.getAttribute("data-element-id");
     value = (wid && radioButtonValues.get(wid)) ?? target.value;
+  } else if (target instanceof HTMLSelectElement && target.multiple) {
+    // .value on a <select multiple> is only the first option; join them all
+    // so save can select() the full set on a PDFOptionList.
+    value = Array.from(target.selectedOptions, (o) => o.value).join(",");
   } else {
     value = target.value;
   }

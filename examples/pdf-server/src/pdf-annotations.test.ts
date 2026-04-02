@@ -1152,6 +1152,76 @@ describe("buildAnnotatedPdfBytes", () => {
       const form = (await PDFDocument.load(out)).getForm();
       expect(form.getTextField("name").getText()).toBe("kept");
     });
+
+    it("a field that throws on write does not abort subsequent fields", async () => {
+      // Regression for #577: the per-field try/catch was dropped, so the
+      // first throwing field bubbled to the outer catch and silently dropped
+      // every field after it. setText() throws when value exceeds maxLength.
+      const doc = await PDFDocument.create();
+      const page = doc.addPage([612, 792]);
+      const form = doc.getForm();
+      const limited = form.createTextField("limited");
+      limited.setMaxLength(2);
+      limited.addToPage(page, { x: 10, y: 700 });
+      form.createTextField("after").addToPage(page, { x: 10, y: 660 });
+      const fixture = await doc.save();
+
+      const out = await buildAnnotatedPdfBytes(
+        fixture,
+        [],
+        new Map<string, string | boolean>([
+          ["limited", "way too long"], // throws
+          ["after", "kept"],
+        ]),
+      );
+
+      const saved = (await PDFDocument.load(out)).getForm();
+      expect(saved.getTextField("after").getText()).toBe("kept");
+      // The throwing field is left at whatever pdf-lib could do with it —
+      // we only assert it didn't poison "after".
+    });
+
+    it("radio misclassified as PDFCheckBox: string value selects the matching widget", async () => {
+      // Some PDFs (e.g. IRS/third-party forms) omit the /Ff Radio bit, so
+      // pdf-lib hands us a PDFCheckBox. The viewer stored pdf.js's
+      // buttonValue ("0"/"1"), not a boolean — check() would always pick
+      // the first widget. setButtonGroupValue writes /V + per-widget /AS
+      // directly so the chosen widget sticks.
+      const doc = await PDFDocument.create();
+      const page = doc.addPage([612, 792]);
+      const form = doc.getForm();
+      const rg = form.createRadioGroup("Gender");
+      rg.addOptionToPage("Male", page, { x: 10, y: 700 });
+      rg.addOptionToPage("Female", page, { x: 60, y: 700 });
+      // pdf-lib's addOptionToPage writes widget on-values "0","1". Clear the
+      // Radio flag (bit 16) so the reloaded form classifies it as checkbox.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (rg.acroField as any).clearFlag(1 << 15);
+      const fixture = await doc.save();
+
+      // Sanity: reload sees it as PDFCheckBox now.
+      const reForm = (await PDFDocument.load(fixture)).getForm();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const reField = reForm.getFieldMaybe("Gender") as any;
+      expect(reField?.constructor?.name).toBe("PDFCheckBox");
+
+      const out = await buildAnnotatedPdfBytes(
+        fixture,
+        [],
+        new Map<string, string | boolean>([["Gender", "1"]]),
+      );
+
+      const saved = await PDFDocument.load(out);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const acro = (saved.getForm().getFieldMaybe("Gender") as any).acroField;
+      const v = acro.dict.get(PDFName.of("V"));
+      expect(v).toBeInstanceOf(PDFName);
+      expect((v as PDFName).decodeText()).toBe("1");
+      // Second widget /AS is the on-state, first is /Off.
+      const widgets = acro.getWidgets();
+      expect(widgets[0].getAppearanceState()?.decodeText()).toBe("Off");
+      expect(widgets[1].getAppearanceState()?.decodeText()).toBe("1");
+    });
   });
 });
 
