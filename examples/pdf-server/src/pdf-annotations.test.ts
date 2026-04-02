@@ -10,6 +10,7 @@ import {
   defaultColor,
   importPdfjsAnnotation,
   buildAnnotatedPdfBytes,
+  parseAnnotationRef,
   base64ToUint8Array,
   uint8ArrayToBase64,
   convertFromModelCoords,
@@ -788,6 +789,29 @@ describe("base64 helpers", () => {
 // PDF Annotation Dict Creation (integration test with pdf-lib)
 // =============================================================================
 
+describe("parseAnnotationRef", () => {
+  it("parses pdf-<num>-<gen> ids", () => {
+    expect(parseAnnotationRef("pdf-118-0")).toEqual({
+      objectNumber: 118,
+      generationNumber: 0,
+    });
+    expect(parseAnnotationRef("pdf-5-2")).toEqual({
+      objectNumber: 5,
+      generationNumber: 2,
+    });
+  });
+  it("parses pdf-<num>R ids (pdf.js string id, gen=0)", () => {
+    expect(parseAnnotationRef("pdf-118R")).toEqual({
+      objectNumber: 118,
+      generationNumber: 0,
+    });
+  });
+  it("returns null for page-index fallback ids", () => {
+    expect(parseAnnotationRef("pdf-1-idx-3")).toBeNull();
+    expect(parseAnnotationRef("user-abc")).toBeNull();
+  });
+});
+
 describe("buildAnnotatedPdfBytes", () => {
   let blankPdfBytes: Uint8Array;
 
@@ -806,6 +830,53 @@ describe("buildAnnotatedPdfBytes", () => {
     // Verify it's a valid PDF (starts with %PDF)
     const header = String.fromCharCode(...result.slice(0, 5));
     expect(header).toBe("%PDF-");
+  });
+
+  it("strips removedRefs entries from each page's /Annots array", async () => {
+    // Seed: add two highlights, save, capture their object refs.
+    const seeded = await buildAnnotatedPdfBytes(
+      blankPdfBytes,
+      [
+        {
+          type: "highlight",
+          id: "h1",
+          page: 1,
+          rects: [{ x: 72, y: 700, width: 100, height: 12 }],
+          color: "#ffff00",
+        },
+        {
+          type: "highlight",
+          id: "h2",
+          page: 1,
+          rects: [{ x: 72, y: 680, width: 100, height: 12 }],
+          color: "#ffff00",
+        },
+      ],
+      new Map(),
+    );
+    const seededDoc = await PDFDocument.load(seeded);
+    const annots = seededDoc.getPage(0).node.Annots()!;
+    expect(annots.size()).toBe(2);
+    const ref0 = annots.get(0) as unknown as {
+      objectNumber: number;
+      generationNumber: number;
+    };
+
+    // Now remove the first one by ref.
+    const stripped = await buildAnnotatedPdfBytes(seeded, [], new Map(), [
+      { objectNumber: ref0.objectNumber, generationNumber: ref0.generationNumber },
+    ]);
+    const strippedDoc = await PDFDocument.load(stripped);
+    const remaining = strippedDoc.getPage(0).node.Annots();
+    expect(remaining?.size() ?? 0).toBe(1);
+  });
+
+  it("removedRefs ignores refs not present in /Annots", async () => {
+    const out = await buildAnnotatedPdfBytes(blankPdfBytes, [], new Map(), [
+      { objectNumber: 9999, generationNumber: 0 },
+    ]);
+    const doc = await PDFDocument.load(out);
+    expect(doc.getPage(0).node.Annots()?.size() ?? 0).toBe(0);
   });
 
   it("adds highlight annotation to PDF", async () => {

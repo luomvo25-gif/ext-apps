@@ -35,6 +35,7 @@ import {
   computeDiff,
   isDiffEmpty,
   buildAnnotatedPdfBytes,
+  parseAnnotationRef,
   importPdfjsAnnotation,
   uint8ArrayToBase64,
   convertFromModelCoords,
@@ -2922,12 +2923,16 @@ async function buildFieldNameMap(
       if (!widgetIds) continue; // no widget → not rendered anyway
 
       // Type comes from getFieldObjects (widget annot data doesn't have it).
-      // Value comes from the widget annotation (fall back to field-dict if
-      // the widget didn't expose one).
+      // Value: prefer the AcroForm field-tree value over the widget's
+      // fieldValue. pdf-lib's save() can leave a page widget pointing at a
+      // stale /V while the field tree has the new one (seen with comb text
+      // fields), and getAnnotations() reads the widget. If the two disagree
+      // we push the field-tree value into annotationStorage so the rendered
+      // input matches what's actually in /AcroForm.
       const type = fieldArr.find((f) => f.type)?.type;
-      const raw = widgetFieldValues.has(name)
-        ? widgetFieldValues.get(name)
-        : fieldArr.find((f) => f.value != null)?.value;
+      const fieldTreeRaw = fieldArr.find((f) => f.value != null)?.value;
+      const widgetRaw = widgetFieldValues.get(name);
+      const raw = fieldTreeRaw ?? widgetRaw;
       const v = normaliseFieldValue(type, raw);
       if (v !== null) {
         pdfBaselineFormValues.set(name, v);
@@ -2935,6 +2940,12 @@ async function buildFieldNameMap(
         // restored localStorage diff (applied in restoreAnnotations) will
         // overwrite specific fields the user changed.
         if (!formFieldValues.has(name)) formFieldValues.set(name, v);
+        // Widget out of sync with field tree → force storage so
+        // AnnotationLayer renders the field-tree value, not the stale
+        // widget. (syncFormValuesToStorage skips baseline==current.)
+        if (fieldTreeRaw != null && fieldTreeRaw !== widgetRaw) {
+          setFieldInStorage(name, v);
+        }
       }
 
       // Skip parent entries with no concrete id (radio groups: the /T tree
@@ -3036,6 +3047,14 @@ async function getAnnotatedPdfBytes(): Promise<Uint8Array> {
     }
   }
 
+  // Baseline annotations the user deleted: strip their refs from /Annots so
+  // they don't reappear on reload. Ids without a recoverable ref (page-index
+  // fallback) can't be removed by-ref and are skipped.
+  const removedRefs = pdfBaselineAnnotations
+    .filter((a) => !annotationMap.has(a.id))
+    .map((a) => parseAnnotationRef(a.id))
+    .filter((r): r is NonNullable<typeof r> => r !== null);
+
   // Only write fields that actually changed vs. what's already in the PDF.
   // Unchanged fields are no-ops at best, and at worst trip pdf-lib edge
   // cases (max-length text, missing /Yes appearance, …) on fields the user
@@ -3060,6 +3079,7 @@ async function getAnnotatedPdfBytes(): Promise<Uint8Array> {
     fullBytes as Uint8Array,
     annotations,
     formFieldsOut,
+    removedRefs,
   );
 }
 

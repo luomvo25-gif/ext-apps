@@ -525,8 +525,8 @@ export async function addAnnotationDicts(
 
   for (const def of annotations) {
     // "imported" annotations are already in the source PDF — never
-    // re-serialize them. (Moving/deleting one is UI-only for now; a future
-    // pass can rewrite the page's /Annots array to drop the original ref.)
+    // re-serialize them. Deletion is handled by buildAnnotatedPdfBytes'
+    // removedRefs strip; moving an imported annotation is still UI-only.
     if (def.type === "imported") continue;
 
     const pageIdx = def.page - 1;
@@ -871,15 +871,60 @@ function setButtonGroupValue(
 }
 
 /**
+ * Recover the PDF object reference from an annotation id assigned by
+ * `makeAnnotationId`. Handles both `pdf-<num>-<gen>` (from `ann.ref`) and
+ * `pdf-<num>R` (from pdf.js's string `ann.id`, gen always 0). Returns null for
+ * page-index fallback ids — those have no stable ref to remove by.
+ */
+export function parseAnnotationRef(
+  id: string,
+): { objectNumber: number; generationNumber: number } | null {
+  let m = /^pdf-(\d+)-(\d+)$/.exec(id);
+  if (m) return { objectNumber: +m[1], generationNumber: +m[2] };
+  m = /^pdf-(\d+)R$/.exec(id);
+  if (m) return { objectNumber: +m[1], generationNumber: 0 };
+  return null;
+}
+
+/**
  * Build annotated PDF bytes from the original document.
- * Applies user annotations and form fills, returns Uint8Array of the new PDF.
+ * Applies user annotations and form fills, removes baseline annotations the
+ * user deleted, returns Uint8Array of the new PDF.
  */
 export async function buildAnnotatedPdfBytes(
   pdfBytes: Uint8Array,
   annotations: PdfAnnotationDef[],
   formFields: Map<string, string | boolean>,
+  removedRefs: { objectNumber: number; generationNumber: number }[] = [],
 ): Promise<Uint8Array> {
   const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+
+  // Strip baseline annotations the user deleted. We match on object number +
+  // generation against each page's /Annots array entries (PDFRef). We don't
+  // know which page they were on, so scan every page — /Annots arrays are
+  // small and this only runs at save time.
+  if (removedRefs.length > 0) {
+    const wanted = new Set(
+      removedRefs.map((r) => `${r.objectNumber} ${r.generationNumber}`),
+    );
+    for (const page of pdfDoc.getPages()) {
+      const annots = page.node.Annots();
+      if (!annots) continue;
+      // Walk backwards so .remove(idx) doesn't shift unprocessed entries.
+      for (let i = annots.size() - 1; i >= 0; i--) {
+        const ref = annots.get(i) as {
+          objectNumber?: number;
+          generationNumber?: number;
+        };
+        if (
+          ref?.objectNumber !== undefined &&
+          wanted.has(`${ref.objectNumber} ${ref.generationNumber ?? 0}`)
+        ) {
+          annots.remove(i);
+        }
+      }
+    }
+  }
 
   // Add proper PDF annotation objects
   await addAnnotationDicts(pdfDoc, annotations);
