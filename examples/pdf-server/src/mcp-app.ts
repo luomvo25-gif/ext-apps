@@ -3110,6 +3110,10 @@ async function savePdf(): Promise<void> {
       for (const [k, v] of formFieldValues) pdfBaselineFormValues.set(k, v);
 
       setDirty(false); // → updateSaveBtn() disables button
+      // Panel diffs against the baselines we just rebased — re-render so the
+      // "edited" badges and pending-change list go away.
+      updateAnnotationsBadge();
+      renderAnnotationPanel();
       const key = annotationStorageKey();
       if (key) {
         try {
