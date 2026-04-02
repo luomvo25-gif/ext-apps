@@ -3878,10 +3878,15 @@ canvasContainerEl.addEventListener(
     // Only intercept horizontal scroll, let vertical scroll through
     if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
 
-    // When zoomed, let natural panning happen (no page changes)
-    if (scale > 1.0) return;
+    // If the page overflows horizontally, let native panning handle it
+    // (no page changes). Checking actual overflow rather than `scale > 1.0`
+    // because fullscreen fit-scale is often >100% with the page still fully
+    // visible — we want swipe-to-page there. +1 absorbs sub-pixel rounding.
+    if (canvasContainerEl.scrollWidth > canvasContainerEl.clientWidth + 1) {
+      return;
+    }
 
-    // At 100% zoom, handle page navigation
+    // No horizontal overflow → swipe changes pages.
     e.preventDefault();
     horizontalScrollAccumulator += e.deltaX;
     if (horizontalScrollAccumulator > SCROLL_THRESHOLD) {
