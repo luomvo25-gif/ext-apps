@@ -2827,7 +2827,8 @@ function normaliseFieldValue(
  */
 async function buildFieldNameMap(
   doc: pdfjsLib.PDFDocumentProxy,
-): Promise<void> {
+): Promise<boolean> {
+  let pushedToStorage = false;
   fieldNameToIds.clear();
   radioButtonValues.clear();
   fieldNameToPage.clear();
@@ -2945,6 +2946,7 @@ async function buildFieldNameMap(
         // widget. (syncFormValuesToStorage skips baseline==current.)
         if (fieldTreeRaw != null && fieldTreeRaw !== widgetRaw) {
           setFieldInStorage(name, v);
+          pushedToStorage = true;
         }
       }
 
@@ -2960,6 +2962,7 @@ async function buildFieldNameMap(
   }
 
   log.info(`Built field name map: ${fieldNameToIds.size} fields`);
+  return pushedToStorage;
 }
 
 /**
@@ -4434,8 +4437,9 @@ async function reloadPdf(): Promise<void> {
     await renderPage();
 
     await loadBaselineAnnotations(document);
-    await buildFieldNameMap(document);
+    const seeded = await buildFieldNameMap(document);
     syncFormValuesToStorage();
+    if (seeded) await renderPage();
     updateAnnotationsBadge();
     renderAnnotationPanel();
 
@@ -4660,9 +4664,16 @@ app.ontoolresult = async (result: CallToolResult) => {
     restoreAnnotations();
 
     // Build field name → annotation ID mapping for form filling
-    await buildFieldNameMap(document);
+    const seeded = await buildFieldNameMap(document);
     // Pre-populate annotationStorage from restored formFieldValues
     syncFormValuesToStorage();
+    // buildFieldNameMap may have pushed AcroForm-tree values into storage
+    // (when the page widget's /V is stale vs the field dict — pdf-lib's save
+    // can leave them split). The first renderPage above ran BEFORE that, so
+    // the form layer shows the stale widget value. Re-render so it picks up
+    // storage. Only when something was actually seeded — most PDFs don't hit
+    // this and the extra render would be pure waste.
+    if (seeded) await renderPage();
 
     updateAnnotationsBadge();
     // Save button visibility driven by setDirty()/updateSaveBtn();
