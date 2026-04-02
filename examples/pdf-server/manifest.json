@@ -34,8 +34,8 @@
       "description": "Display an interactive PDF viewer with search and navigation"
     },
     {
-      "name": "read_pdf_bytes",
-      "description": "Read a range of bytes from a PDF file (max 512KB per request)"
+      "name": "interact",
+      "description": "Interact with a PDF viewer: annotate, navigate, search, extract text/screenshots, fill forms"
     }
   ],
   "keywords": ["pdf", "documents", "viewer", "reading"],
