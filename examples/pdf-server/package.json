@@ -21,7 +21,8 @@
     "start": "cross-env NODE_ENV=development npm run build && npm run serve",
     "start:stdio": "cross-env NODE_ENV=development npm run build 1>&2 && npm run serve:stdio",
     "dev": "cross-env NODE_ENV=development concurrently \"npm run watch\" \"npm run serve\"",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "build:mcpb": "npm run build && node build-mcpb.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "^1.0.0",
