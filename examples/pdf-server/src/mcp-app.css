@@ -330,6 +330,13 @@ body {
    * pan-x pan-y keeps native scrolling/panning working. iOS Safari only
    * partially honours this — preventDefault on touchmove backs it up. */
   touch-action: pan-x pan-y;
+  /* Keep the page clear of host overlays (chat input, home indicator).
+   * computeFitScale subtracts padding, so fit-to-page lands above these.
+   * The container background still extends edge-to-edge (.main.fullscreen
+   * has padding:0). Top inset is on the toolbar; the rest land here. */
+  padding-bottom: calc(1rem + var(--safe-bottom, 0px));
+  padding-left: calc(1rem + var(--safe-left, 0px));
+  padding-right: calc(1rem + var(--safe-right, 0px));
 }
 
 /* Search Button */
