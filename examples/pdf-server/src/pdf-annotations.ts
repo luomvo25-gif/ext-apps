@@ -21,6 +21,7 @@ import {
   PDFTextField,
   PDFCheckBox,
   PDFDropdown,
+  PDFOptionList,
   PDFRadioGroup,
   type PDFForm,
 } from "pdf-lib";
@@ -907,10 +908,23 @@ export async function buildAnnotatedPdfBytes(
             // select() auto-enables edit mode for values outside getOptions(),
             // so this works for both enumerated and free-text combos.
             field.select(String(value));
+          } else if (field instanceof PDFOptionList) {
+            // Viewer stores multiselect listboxes as a comma-joined string
+            // (pdf.js's annotationStorage value for /Ch is string|string[];
+            // our Map<string,string|boolean> flattens arrays). Only select
+            // values that are actually in the option list — pdf-lib throws
+            // on unknowns and there's no edit-mode fallback like Dropdown.
+            const opts = field.getOptions();
+            const wanted = String(value)
+              .split(",")
+              .map((s) => s.trim())
+              .filter((s) => opts.includes(s));
+            if (wanted.length > 0) field.select(wanted);
+            else field.clear();
           } else if (field instanceof PDFTextField) {
             field.setText(String(value));
           }
-          // PDFButton, PDFOptionList, PDFSignature: no fill_form support yet
+          // PDFButton, PDFSignature: no fill_form support yet
         } catch (err) {
           // Skip this field; carry on with the rest. Surfacing per-field
           // failures is the caller's job (see fill_form result), not save's.
