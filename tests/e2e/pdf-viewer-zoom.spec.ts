@@ -142,13 +142,13 @@ test.describe("PDF Viewer — fullscreen fit + pinch zoom", () => {
       .toBe("");
   });
 
-  test("trackpad pinch is ignored outside fullscreen", async ({ page }) => {
+  test("trackpad pinch-in while inline enters fullscreen", async ({ page }) => {
     await page.setViewportSize({ width: 1400, height: 800 });
     await loadPdfServer(page);
     await waitForPdfRender(page);
     const app = getAppFrame(page);
 
-    const before = await readZoomPercent(page);
+    await expect(app.locator(".main.fullscreen")).toHaveCount(0);
 
     await app.locator(".canvas-container").evaluate((el) => {
       el.dispatchEvent(
@@ -161,8 +161,33 @@ test.describe("PDF Viewer — fullscreen fit + pinch zoom", () => {
       );
     });
 
-    // No settle timer should have started — zoom stays put.
+    // Pinch-in should request fullscreen, not zoom the inline view.
+    await expect(app.locator(".main.fullscreen")).toHaveCount(1, {
+      timeout: 5000,
+    });
+  });
+
+  test("trackpad pinch-out while inline is a no-op", async ({ page }) => {
+    await page.setViewportSize({ width: 1400, height: 800 });
+    await loadPdfServer(page);
+    await waitForPdfRender(page);
+    const app = getAppFrame(page);
+
+    const before = await readZoomPercent(page);
+
+    await app.locator(".canvas-container").evaluate((el) => {
+      el.dispatchEvent(
+        new WheelEvent("wheel", {
+          deltaY: 50, // pinch-out
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+
     await page.waitForTimeout(300);
     expect(await readZoomPercent(page)).toBe(before);
+    await expect(app.locator(".main.fullscreen")).toHaveCount(0);
   });
 });
