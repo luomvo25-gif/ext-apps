@@ -342,6 +342,11 @@ async function refitScale(): Promise<void> {
 // needs height changes too (rotation, browser chrome on mobile).
 let lastContainerW = 0;
 let lastContainerH = 0;
+/** One-shot: refit on the next resize even if it's a shrink in inline mode.
+ *  Set on fullscreen→inline so the page snaps to the new (smaller) width
+ *  once the host has actually resized the iframe — the inline `grewW` gate
+ *  would otherwise swallow that shrink. */
+let forceNextResizeRefit = false;
 const containerResizeObserver = new ResizeObserver(([entry]) => {
   const { width: w, height: h } = entry.contentRect;
   const grewW = w > lastContainerW + 1;
@@ -349,7 +354,12 @@ const containerResizeObserver = new ResizeObserver(([entry]) => {
     Math.abs(w - lastContainerW) > 1 || Math.abs(h - lastContainerH) > 1;
   lastContainerW = w;
   lastContainerH = h;
-  if (currentDisplayMode === "fullscreen" ? changed : grewW) refitScale();
+  if (forceNextResizeRefit && changed) {
+    forceNextResizeRefit = false;
+    refitScale();
+  } else if (currentDisplayMode === "fullscreen" ? changed : grewW) {
+    refitScale();
+  }
 });
 containerResizeObserver.observe(canvasContainerEl as HTMLElement);
 
@@ -3811,6 +3821,7 @@ function commitPinch() {
   ) {
     pageWrapperEl.style.transform = "";
     userHasZoomed = false; // let refitScale() size the inline view
+    forceNextResizeRefit = true; // ResizeObserver inline path ignores shrinks
     modeTransitionInFlight = true;
     void toggleFullscreen().finally(() => {
       setTimeout(() => (modeTransitionInFlight = false), 250);
@@ -4782,6 +4793,12 @@ function handleHostContextChanged(ctx: McpUiHostContext) {
     // Re-apply panel layout for new display mode
     if (panelState.open) {
       setAnnotationPanelOpen(true);
+    }
+    if (!isFullscreen) {
+      // The iframe shrink lands after this handler; let the ResizeObserver
+      // do one refit on that shrink (its inline branch normally ignores
+      // shrinks to avoid a requestFitToContent feedback loop).
+      forceNextResizeRefit = true;
     }
     if (wasFullscreen !== isFullscreen) {
       // Mode changed → refit. computeFitScale reads displayMode, so
