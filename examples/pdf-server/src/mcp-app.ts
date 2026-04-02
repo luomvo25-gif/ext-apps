@@ -3048,6 +3048,11 @@ async function renderPage() {
     // Set display size in CSS pixels
     canvasEl.style.width = `${viewport.width}px`;
     canvasEl.style.height = `${viewport.height}px`;
+    // If a pinch preview transform is on .page-wrapper, drop it in the same
+    // frame as the canvas resize. Clearing earlier (in commitPinch, before
+    // the await getPage() above) snaps the page back to the old size for
+    // one frame; clearing later double-applies the scale until render ends.
+    pageWrapperEl.style.transform = "";
 
     // Scale context for retina
     ctx.scale(dpr, dpr);
@@ -3778,11 +3783,16 @@ function updatePinch(nextScale: number) {
 }
 
 function commitPinch() {
-  pageWrapperEl.style.transform = "";
   pageWrapperEl.style.transition = "";
-  if (Math.abs(previewScale - scale) < 0.01) return; // dead-zone, no-op
+  if (Math.abs(previewScale - scale) < 0.01) {
+    // Dead-zone — no re-render. Clear here since renderPage won't run.
+    pageWrapperEl.style.transform = "";
+    return;
+  }
   userHasZoomed = true;
   scale = previewScale;
+  // renderPage clears the transform in the same frame as the canvas
+  // resize (after its first await) so there's no snap-back.
   renderPage().then(scrollSelectionIntoView);
 }
 
@@ -3805,10 +3815,12 @@ canvasContainerEl.addEventListener(
       // pinch out then back lands where you started.
       updatePinch(previewScale * Math.exp(-e.deltaY * 0.01));
       if (pinchSettleTimer) clearTimeout(pinchSettleTimer);
+      // 200ms — slow trackpad pinches can leave >150ms gaps between wheel
+      // events, which would commit-then-restart and feel steppy.
       pinchSettleTimer = setTimeout(() => {
         pinchSettleTimer = null;
         commitPinch();
-      }, 150);
+      }, 200);
       return;
     }
 
