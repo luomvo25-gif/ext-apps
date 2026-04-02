@@ -917,6 +917,16 @@ export async function buildAnnotatedPdfBytes(
           console.warn(`buildAnnotatedPdfBytes: skipped field "${name}":`, err);
         }
       }
+      // Some PDFs ship widgets with no on-state appearance stream (no
+      // /AP/N/<onValue>). pdf-lib's check()/select()/setText() set /V and /AS
+      // but don't synthesize the missing appearance, so other readers
+      // (Preview, Acrobat) show the field as if unchanged. This generates a
+      // default appearance for any field marked dirty above.
+      try {
+        form.updateFieldAppearances();
+      } catch (err) {
+        console.warn("buildAnnotatedPdfBytes: updateFieldAppearances:", err);
+      }
     }
   }
 
