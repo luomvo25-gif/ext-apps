@@ -3781,9 +3781,6 @@ document.addEventListener("selectionchange", () => {
 let pinchStartScale = 1.0;
 /** What we'd commit to if the gesture ended right now. */
 let previewScale = 1.0;
-/** Unclamped target — used to detect "pinched out past fit" even when
- *  previewScale is pinned at ZOOM_MIN. */
-let previewScaleRaw = 1.0;
 /** Debounce timer — wheel events have no end event, so we wait for quiet. */
 let pinchSettleTimer: ReturnType<typeof setTimeout> | null = null;
 /** computeFitScale() snapshot at gesture start (async — may be null briefly). */
@@ -3795,8 +3792,10 @@ let modeTransitionInFlight = false;
 function beginPinch() {
   pinchStartScale = scale;
   previewScale = scale;
-  previewScaleRaw = scale;
-  fitScaleAtPinchStart = null;
+  // Seed synchronously when we can (at fit ⇔ !userHasZoomed) so the very
+  // first updatePinch already has the right floor — avoids a one-frame
+  // jitter when the async computeFitScale resolves mid-gesture.
+  fitScaleAtPinchStart = userHasZoomed ? null : scale;
   void computeFitScale().then((s) => (fitScaleAtPinchStart = s));
   // transform-origin matches the flex layout's anchor (justify-content:
   // center, align-items: flex-start) so the preview and the committed
@@ -3804,19 +3803,19 @@ function beginPinch() {
   pageWrapperEl.style.transformOrigin = "50% 0";
 }
 
+/** Fit-to-page floor for fullscreen (committed scale never goes below this).
+ *  The preview is allowed to overshoot down to 0.75×fit for rubber-band
+ *  feedback; release below 0.9×fit exits to inline, otherwise snaps to fit. */
+function pinchFitFloor(): number | null {
+  return currentDisplayMode === "fullscreen" ? fitScaleAtPinchStart : null;
+}
+
 function updatePinch(nextScale: number) {
-  // In fullscreen, never shrink below fit — fit-to-page is "fully visible",
-  // so anything smaller just adds dead margin.
-  const floor =
-    currentDisplayMode === "fullscreen" && fitScaleAtPinchStart !== null
-      ? Math.max(ZOOM_MIN, fitScaleAtPinchStart)
-      : ZOOM_MIN;
-  // previewScaleRaw is the wheel handler's accumulator AND the exit-to-inline
-  // signal. It must be allowed past `floor` (so commitPinch sees < fit*0.9)
-  // but bounded so reversing direction doesn't have to unwind a huge
-  // overshoot before the visible scale moves again.
-  previewScaleRaw = Math.min(ZOOM_MAX, Math.max(floor * 0.7, nextScale));
-  previewScale = Math.min(ZOOM_MAX, Math.max(floor, nextScale));
+  const fit = pinchFitFloor();
+  // Rubber-band: preview may dip to 0.75×fit so the user sees the page pull
+  // away as they pinch out. Committed scale is clamped to fit in commitPinch.
+  const previewFloor = fit !== null ? fit * 0.75 : ZOOM_MIN;
+  previewScale = Math.min(ZOOM_MAX, Math.max(previewFloor, nextScale));
   // Transform is RELATIVE to the rendered canvas (which sits at
   // pinchStartScale), so a previewScale equal to pinchStartScale → ratio 1.
   pageWrapperEl.style.transform = `scale(${previewScale / pinchStartScale})`;
@@ -3824,14 +3823,14 @@ function updatePinch(nextScale: number) {
 }
 
 function commitPinch() {
-  // Pinching out past fit while already at (or below) fit → user wants to
-  // leave fullscreen, not zoom further out. 0.9× threshold so a slight
-  // overshoot doesn't eject them.
+  const fit = pinchFitFloor();
+  // Pinched out past fit (page visibly pulled away) → exit fullscreen.
+  // Only when the gesture *started* near fit, so a single big pinch-out
+  // from deep zoom lands at fit instead of ejecting unexpectedly.
   if (
-    currentDisplayMode === "fullscreen" &&
-    fitScaleAtPinchStart !== null &&
-    pinchStartScale <= fitScaleAtPinchStart + 0.01 &&
-    previewScaleRaw < fitScaleAtPinchStart * 0.9
+    fit !== null &&
+    pinchStartScale <= fit * 1.05 &&
+    previewScale < fit * 0.9
   ) {
     pageWrapperEl.style.transform = "";
     userHasZoomed = false; // let refitScale() size the inline view
@@ -3842,13 +3841,19 @@ function commitPinch() {
     });
     return;
   }
-  if (Math.abs(previewScale - scale) < 0.01) {
-    // Dead-zone — no re-render. Clear here since renderPage won't run.
+  // Committed scale never below fit in fullscreen — overshoot snaps back.
+  const target =
+    fit !== null
+      ? Math.max(fit, previewScale)
+      : Math.max(ZOOM_MIN, previewScale);
+  if (Math.abs(target - scale) < 0.01) {
+    // Snap-back / dead-zone — no re-render needed.
     pageWrapperEl.style.transform = "";
+    zoomLevelEl.textContent = `${Math.round(scale * 100)}%`;
     return;
   }
   userHasZoomed = true;
-  scale = previewScale;
+  scale = target;
   // renderPage clears the transform in the same frame as the canvas
   // resize (after its first await) so there's no snap-back.
   renderPage().then(scrollSelectionIntoView);
@@ -3889,10 +3894,7 @@ canvasContainerEl.addEventListener(
       // physical mouse wheel (deltaY ≈ ±100/notch) doesn't slam to the
       // limit; trackpad pinch deltas are ~±1-10 so the clamp is a no-op.
       const d = Math.max(-25, Math.min(25, e.deltaY));
-      // Drive off previewScaleRaw (not previewScale) so we can accumulate
-      // past the fit-floor and trigger exit-to-inline. previewScaleRaw is
-      // itself bounded in updatePinch() so reversal stays responsive.
-      updatePinch(previewScaleRaw * Math.exp(-d * 0.01));
+      updatePinch(previewScale * Math.exp(-d * 0.01));
       if (pinchSettleTimer) clearTimeout(pinchSettleTimer);
       // 200ms — slow trackpad pinches can leave >150ms gaps between wheel
       // events, which would commit-then-restart and feel steppy.
