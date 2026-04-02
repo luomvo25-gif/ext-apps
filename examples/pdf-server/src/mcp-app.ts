@@ -3225,8 +3225,15 @@ async function renderPage() {
     // resize so the size handoff is atomic.
     pageWrapperEl.style.transform = "";
 
-    // Scale context for retina
-    ctx.scale(dpr, dpr);
+    // Retina: pass dpr via page.render's `transform` (NOT ctx.scale).
+    // pdf.js sizes per-annotation canvases as
+    //   width = rectW * outputScaleX * viewport.scale
+    // and outputScaleX is read from transform[0] (defaults to 1). A bare
+    // ctx.scale(dpr,dpr) leaves outputScaleX at 1, so the
+    // annotationCanvasMap canvases get a half-sized backing store on
+    // retina while their internal setTransform IS dpr-aware → the
+    // appearance renders 2× too big into a 1× buffer → cropped/shifted.
+    const dprTransform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined;
 
     // Clear and setup text layer
     textLayerEl.innerHTML = "";
@@ -3249,6 +3256,7 @@ async function renderPage() {
     const renderTask = (page.render as any)({
       canvasContext: ctx,
       viewport,
+      transform: dprTransform,
       annotationCanvasMap,
       // isEditing forces hasOwnCanvas=true for stamps regardless of /F
       // NoRotate (StampAnnotation.mustBeViewedWhenEditing in pdf.worker).
@@ -3337,8 +3345,15 @@ async function renderPage() {
           commentManager: null,
         } as any);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        // Only feed Widgets (form fields) here. Markup annotations are
+        // owned by #annotation-layer; letting AnnotationLayer create
+        // <section> elements for them in #form-layer adds invisible
+        // pointer-events:auto boxes that steal clicks from our overlays.
+        const widgetAnns = annotations.filter(
+          (a: { subtype?: string }) => a.subtype === "Widget",
+        );
         await annotationLayer.render({
-          annotations,
+          annotations: widgetAnns,
           div: formLayerEl,
           page,
           viewport,
