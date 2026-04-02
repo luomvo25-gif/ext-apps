@@ -3158,20 +3158,11 @@ async function renderPage() {
     // Set --scale-factor so CSS font-size/transform rules work correctly.
     textLayerEl.style.setProperty("--scale-factor", `${scale}`);
 
-    // Render canvas - track the task so we can cancel it.
-    //
-    // annotationMode: DISABLE — markup annotations are owned by OUR
-    // annotation layer (renderAnnotationsForPage). Letting page.render
-    // paint them too gave a doubled-up display where the canvas pixel
-    // looked like the annotation but wasn't clickable, and our DOM
-    // version (which IS clickable) sat on top with our own styling.
-    // Form widgets are unaffected — those live in #form-layer via
-    // AnnotationLayer.render(), not the canvas.
+    // Render canvas - track the task so we can cancel it
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const renderTask = (page.render as any)({
       canvasContext: ctx,
       viewport,
-      annotationMode: AnnotationMode.DISABLE,
     });
     currentRenderTask = renderTask;
 
