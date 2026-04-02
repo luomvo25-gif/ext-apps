@@ -314,20 +314,19 @@ body {
 }
 
 .main.fullscreen .toolbar {
-  padding-top: calc(0.25rem + var(--safe-top, 0px));
-  padding-bottom: 0.25rem;
-  padding-left: calc(0.5rem + var(--safe-left, 0px));
-  padding-right: calc(0.5rem + var(--safe-right, 0px));
-  min-height: calc(40px + var(--safe-top, 0px));
+  /* Hosts wrap fullscreen in their own header (title + close), which already
+   * clears the top safe-area — so no --safe-top here, only sides. */
+  padding: 0.25rem calc(0.5rem + var(--safe-right, 0px)) 0.25rem
+    calc(0.5rem + var(--safe-left, 0px));
+  min-height: 40px;
   /* Inline can wrap (narrow chat bubble); fullscreen has the width, and
    * wrapping would double the bar height + desync the search-bar offset. */
   flex-wrap: nowrap;
 }
 
 .main.fullscreen .search-bar {
-  /* Track the toolbar's actual height (safe-area grows it). -1px overlaps
-   * the toolbar border so the dropdown looks attached. */
-  top: calc(40px + var(--safe-top, 0px) - 1px);
+  /* -1px overlaps the toolbar border so the dropdown looks attached. */
+  top: 39px;
   right: calc(var(--safe-right, 0px) - 1px);
 }
 
