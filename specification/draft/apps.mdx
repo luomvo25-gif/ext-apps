@@ -1882,7 +1882,7 @@ app.registerTool("export_report", { /* … */ }, async (args) => {
 
 #### Schema Validation
 
-The SDK provides automatic schema validation using Zod:
+The SDK validates input and output against any [Standard Schema](https://standardschema.dev/)–compatible library (Zod, ArkType, Valibot, …). Examples below use Zod:
 
 **Input Validation:**
 
