@@ -6,9 +6,15 @@ import type {
 
 export type { StandardJSONSchemaV1, StandardSchemaV1, StandardTypedV1 };
 
+// TODO(sdk-v2): once @modelcontextprotocol/core v2 is stable, import
+// StandardSchemaWithJSON / standardSchemaToJsonSchema / validateStandardSchema
+// from there and delete this file. At that point decide whether to tighten
+// App.registerTool to StandardSchemaWithJSON (drops zod 3 from the peer range
+// and the lazy z.toJSONSchema fallback below).
+
 /**
  * A schema that implements both Standard Schema (validation) and Standard JSON
- * Schema (serialization). Zod ≥3.25, ArkType, and Valibot (via
+ * Schema (serialization). Zod v4, ArkType, and Valibot (via
  * `@valibot/to-json-schema`) all satisfy this.
  *
  * Mirrors the type of the same name in `@modelcontextprotocol/core` v2 so that
