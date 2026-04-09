@@ -1287,6 +1287,40 @@ describe("App <-> AppBridge integration", () => {
         expect(result.tools.map((t) => t.name)).toContain("tool3");
       });
 
+      it("emits core MCP Tool fields (title, outputSchema only when provided)", async () => {
+        const appCapabilities = { tools: { listChanged: true } };
+        app = new App(testAppInfo, appCapabilities, { autoResize: false });
+
+        app.registerTool(
+          "with-output",
+          {
+            title: "With Output",
+            description: "has structured output",
+            outputSchema: z.object({ ok: z.boolean() }),
+          },
+          async () => ({
+            content: [],
+            structuredContent: { ok: true },
+          }),
+        );
+        app.registerTool(
+          "no-output",
+          { description: "no structured output" },
+          async () => ({ content: [] }),
+        );
+
+        await app.connect(appTransport);
+        const result = await bridge.listTools({});
+        const byName = Object.fromEntries(result.tools.map((t) => [t.name, t]));
+
+        expect(byName["with-output"].title).toBe("With Output");
+        expect(byName["with-output"].inputSchema).toBeDefined();
+        expect(byName["with-output"].outputSchema).toBeDefined();
+        // outputSchema is optional in core MCP — omitted when not declared
+        expect(byName["no-output"]).not.toHaveProperty("outputSchema");
+        expect(byName["no-output"].inputSchema).toBeDefined();
+      });
+
       it("returns empty list when no tools registered", async () => {
         const appCapabilities = { tools: { listChanged: true } };
         app = new App(testAppInfo, appCapabilities, { autoResize: false });

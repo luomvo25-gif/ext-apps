@@ -424,6 +424,7 @@ export class App extends ProtocolWithEvents<
         .map(([name, tool]) => {
           const result: Tool = {
             name,
+            title: tool.title,
             description: tool.description,
             inputSchema: (tool.inputSchema
               ? z.toJSONSchema(tool.inputSchema as ZodSchema)
@@ -431,13 +432,14 @@ export class App extends ProtocolWithEvents<
                   type: "object" as const,
                   properties: {},
                 }) as Tool["inputSchema"],
-            outputSchema: (tool.outputSchema
-              ? z.toJSONSchema(tool.outputSchema as ZodSchema)
-              : {
-                  type: "object" as const,
-                  properties: {},
-                }) as Tool["outputSchema"],
           };
+          // outputSchema is optional in core MCP — only emit when the app
+          // provided one, otherwise hosts would assume structuredContent.
+          if (tool.outputSchema) {
+            result.outputSchema = z.toJSONSchema(
+              tool.outputSchema as ZodSchema,
+            ) as Tool["outputSchema"];
+          }
           if (tool.annotations) {
             result.annotations = tool.annotations;
           }
