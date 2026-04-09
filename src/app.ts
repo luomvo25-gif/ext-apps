@@ -65,12 +65,15 @@ import {
 } from "./types";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
-  StandardSchemaWithJSON,
+  StandardSchemaV1,
   standardSchemaToJsonSchema,
   validateStandardSchema,
 } from "./standard-schema";
 
-export type { StandardSchemaWithJSON } from "./standard-schema";
+export type {
+  StandardSchemaV1,
+  StandardSchemaWithJSON,
+} from "./standard-schema";
 
 export { PostMessageTransport } from "./message-transport";
 export * from "./types";
@@ -178,14 +181,14 @@ type RequestHandlerExtra = Parameters<
  * `extra`.
  *
  * Mirrors `ToolCallback` from `@modelcontextprotocol/sdk/server/mcp.js` but is
- * parameterized over {@link StandardSchemaWithJSON} instead of zod, so any
+ * parameterized over {@link StandardSchemaV1} instead of zod, so any
  * Standard-Schema-compatible library (Zod, ArkType, Valibot, …) can be used.
  */
 export type AppToolCallback<
-  In extends StandardSchemaWithJSON | undefined = undefined,
-> = In extends StandardSchemaWithJSON
+  In extends StandardSchemaV1 | undefined = undefined,
+> = In extends StandardSchemaV1
   ? (
-      args: StandardSchemaWithJSON.InferOutput<In>,
+      args: StandardSchemaV1.InferOutput<In>,
       extra: RequestHandlerExtra,
     ) => CallToolResult | Promise<CallToolResult>
   : (extra: RequestHandlerExtra) => CallToolResult | Promise<CallToolResult>;
@@ -193,13 +196,13 @@ export type AppToolCallback<
 /**
  * Handle returned by {@link App.registerTool}. Mirrors `RegisteredTool` from
  * `@modelcontextprotocol/sdk/server/mcp.js` but stores
- * {@link StandardSchemaWithJSON} schemas.
+ * {@link StandardSchemaV1} schemas.
  */
 export type RegisteredAppTool = {
   title?: string;
   description?: string;
-  inputSchema?: StandardSchemaWithJSON;
-  outputSchema?: StandardSchemaWithJSON;
+  inputSchema?: StandardSchemaV1;
+  outputSchema?: StandardSchemaV1;
   annotations?: ToolAnnotations;
   _meta?: Record<string, unknown>;
   enabled: boolean;
@@ -360,8 +363,8 @@ export class App extends ProtocolWithEvents<
   }
 
   registerTool<
-    OutputArgs extends StandardSchemaWithJSON,
-    InputArgs extends undefined | StandardSchemaWithJSON = undefined,
+    OutputArgs extends StandardSchemaV1,
+    InputArgs extends undefined | StandardSchemaV1 = undefined,
   >(
     name: string,
     config: {
@@ -410,7 +413,7 @@ export class App extends ProtocolWithEvents<
               `Invalid input for tool ${name}: `,
             )
           : rawArgs;
-        const result = await (cb as AppToolCallback<StandardSchemaWithJSON>)(
+        const result = await (cb as AppToolCallback<StandardSchemaV1>)(
           parsedArgs,
           extra,
         );
@@ -455,36 +458,38 @@ export class App extends ProtocolWithEvents<
       return tool.handler(params.arguments, extra);
     };
     this.onlisttools = async (_params, _extra) => {
-      const tools: Tool[] = Object.entries(this._registeredTools)
-        .filter(([_, tool]) => tool.enabled)
-        .map(([name, tool]) => {
-          const result: Tool = {
-            name,
-            title: tool.title,
-            description: tool.description,
-            inputSchema: (tool.inputSchema
-              ? standardSchemaToJsonSchema(tool.inputSchema, "input")
-              : {
-                  type: "object" as const,
-                  properties: {},
-                }) as Tool["inputSchema"],
-          };
-          // outputSchema is optional in core MCP — only emit when the app
-          // provided one, otherwise hosts would assume structuredContent.
-          if (tool.outputSchema) {
-            result.outputSchema = standardSchemaToJsonSchema(
-              tool.outputSchema,
-              "output",
-            ) as Tool["outputSchema"];
-          }
-          if (tool.annotations) {
-            result.annotations = tool.annotations;
-          }
-          if (tool._meta) {
-            result._meta = tool._meta;
-          }
-          return result;
-        });
+      const tools: Tool[] = await Promise.all(
+        Object.entries(this._registeredTools)
+          .filter(([_, tool]) => tool.enabled)
+          .map(async ([name, tool]) => {
+            const result: Tool = {
+              name,
+              title: tool.title,
+              description: tool.description,
+              inputSchema: (tool.inputSchema
+                ? await standardSchemaToJsonSchema(tool.inputSchema, "input")
+                : {
+                    type: "object" as const,
+                    properties: {},
+                  }) as Tool["inputSchema"],
+            };
+            // outputSchema is optional in core MCP — only emit when the app
+            // provided one, otherwise hosts would assume structuredContent.
+            if (tool.outputSchema) {
+              result.outputSchema = (await standardSchemaToJsonSchema(
+                tool.outputSchema,
+                "output",
+              )) as Tool["outputSchema"];
+            }
+            if (tool.annotations) {
+              result.annotations = tool.annotations;
+            }
+            if (tool._meta) {
+              result._meta = tool._meta;
+            }
+            return result;
+          }),
+      );
       return { tools };
     };
   }

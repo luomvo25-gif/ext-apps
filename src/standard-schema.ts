@@ -34,15 +34,32 @@ const TARGET = { target: "draft-2020-12" } as const;
 
 /**
  * Serialize a Standard Schema to JSON Schema for the given direction.
- * Thin wrapper around `~standard.jsonSchema.{input,output}` that fixes the
- * target to draft-2020-12 (the dialect MCP `Tool.inputSchema`/`outputSchema`
- * uses).
+ *
+ * Uses `~standard.jsonSchema` when present (zod v4, ArkType, Valibot, …).
+ * Falls back to a lazy `zod/v4` import for zod v3.25.x — which implements
+ * `~standard.validate` but not yet `~standard.jsonSchema` — so the existing
+ * `^3.25.0 || ^4.0.0` peer range keeps working. Non-zod schemas without
+ * `jsonSchema` throw.
  */
-export function standardSchemaToJsonSchema(
-  schema: StandardSchemaWithJSON,
+export async function standardSchemaToJsonSchema(
+  schema: StandardSchemaV1,
   io: "input" | "output",
-): Record<string, unknown> {
-  return schema["~standard"].jsonSchema[io](TARGET);
+): Promise<Record<string, unknown>> {
+  const std = schema["~standard"] as Partial<
+    StandardSchemaWithJSON["~standard"]
+  >;
+  if (std.jsonSchema) {
+    return std.jsonSchema[io](TARGET);
+  }
+  if (std.vendor === "zod") {
+    const { z } = await import("zod/v4");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- bridging StandardSchemaV1 → zod's $ZodType for the v3.25 fallback
+    return z.toJSONSchema(schema as any, { io });
+  }
+  throw new Error(
+    `Schema (vendor: ${std.vendor}) does not implement Standard JSON Schema (~standard.jsonSchema). ` +
+      `Use a library that does (zod v4, ArkType, Valibot) or wrap your schema accordingly.`,
+  );
 }
 
 /**

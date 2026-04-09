@@ -1385,6 +1385,58 @@ describe("App <-> AppBridge integration", () => {
         ).rejects.toThrow(/Invalid input for tool translate/);
       });
 
+      it("falls back to z.toJSONSchema for zod schemas lacking ~standard.jsonSchema (zod v3.25.x)", async () => {
+        // zod v3.25 implements ~standard.validate but not ~standard.jsonSchema.
+        // Simulate by stripping jsonSchema from a real zod schema.
+        const v4Schema = z.object({ q: z.string() });
+        const zod3LikeSchema = Object.assign(Object.create(v4Schema), {
+          "~standard": {
+            version: 1 as const,
+            vendor: "zod",
+            validate: v4Schema["~standard"].validate,
+            types: undefined as
+              | undefined
+              | {
+                  readonly input: { q: string };
+                  readonly output: { q: string };
+                },
+            // no jsonSchema
+          },
+        });
+
+        const appCapabilities = { tools: { listChanged: true } };
+        app = new App(testAppInfo, appCapabilities, { autoResize: false });
+        app.registerTool(
+          "search",
+          { inputSchema: zod3LikeSchema },
+          async ({ q }: { q: string }) => ({
+            content: [{ type: "text" as const, text: q }],
+          }),
+        );
+        await app.connect(appTransport);
+
+        const list = await bridge.listTools({});
+        expect(list.tools[0].inputSchema.properties).toHaveProperty("q");
+
+        // Non-zod schema without jsonSchema → listTools rejects with guidance.
+        app.registerTool(
+          "broken",
+          {
+            inputSchema: {
+              "~standard": {
+                version: 1 as const,
+                vendor: "mystery",
+                validate: () => ({ value: {} }),
+              },
+            },
+          },
+          async () => ({ content: [] }),
+        );
+        expect(bridge.listTools({})).rejects.toThrow(
+          /does not implement Standard JSON Schema/,
+        );
+      });
+
       it("returns empty list when no tools registered", async () => {
         const appCapabilities = { tools: { listChanged: true } };
         app = new App(testAppInfo, appCapabilities, { autoResize: false });
