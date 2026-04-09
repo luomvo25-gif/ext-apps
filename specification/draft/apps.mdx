@@ -1277,6 +1277,7 @@ interface Tool {
   name: string;                    // Unique tool identifier
   description?: string;            // Human-readable description
   inputSchema: object;             // JSON Schema for arguments
+  outputSchema?: object;           // JSON Schema for structuredContent (matches core MCP)
   annotations?: ToolAnnotations;   // MCP tool annotations (e.g., readOnlyHint)
 }
 ```
@@ -1704,8 +1705,8 @@ Apps can register their own tools that hosts and agents can call, making apps **
 #### Motivation: Semantic Introspection
 
 Without tool registration, apps are black boxes to the model:
-- Model sees visual output (screenshots) but not semantic state
-- Model cannot query app state without DOM parsing
+- Model sees only the app's rendered iframe, which is opaque to it — not semantic state
+- Model cannot query the app's state, since it cannot synchronously access its DOM
 - Model cannot discover what operations are available
 
 With tool registration, apps expose semantic interfaces:
@@ -1714,7 +1715,7 @@ With tool registration, apps expose semantic interfaces:
 - Model executes actions via tools (e.g., `make_move`)
 - Apps provide structured data instead of requiring HTML/CSS interpretation
 
-This is a different model from approaches where apps keep the model informed through side channels (e.g., OAI Apps SDK sending widget state changes to the model, MCP-UI adding tool call results to chat history). Instead, the agent actively queries app state and executes operations through tools.
+This is a different model from approaches where apps *push* state to the model through side channels — e.g., OAI Apps SDK's [`setWidgetState()`](https://developers.openai.com/apps-sdk/reference/sdk#setwidgetstate), MCP-UI adding tool-call results to chat history, or this spec's own [`ui/update-model-context`](#uiupdate-model-context) notification. Tool registration is *pull*: the agent actively queries app state and executes operations on demand through tools. The two are complementary.
 
 #### App Tool Registration
 
@@ -2299,6 +2300,7 @@ This specification defines the Minimum Viable Product (MVP) for MCP Apps.
 - Standardized permission model specifications
 - Tool categories/tags for organization
 - Cross-app tool composition
+- App tools returning MCP Task references for work that outlives the render lifecycle
 - Tool marketplace/discovery mechanisms
 
 **Other Advanced Features (see Future Considerations):**
