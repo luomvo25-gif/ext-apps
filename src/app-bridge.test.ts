@@ -1321,6 +1321,70 @@ describe("App <-> AppBridge integration", () => {
         expect(byName["no-output"].inputSchema).toBeDefined();
       });
 
+      it("accepts any Standard Schema implementation, not only zod", async () => {
+        // Hand-rolled StandardSchemaWithJSON — proves registerTool has no
+        // zod-specific runtime path. Any library implementing the spec
+        // (ArkType, Valibot, …) works the same way.
+        type Point = { x: number; y: number };
+        const PointSchema = {
+          "~standard": {
+            version: 1 as const,
+            vendor: "test",
+            types: undefined as
+              | undefined
+              | { readonly input: Point; readonly output: Point },
+            validate: (v: unknown) =>
+              typeof v === "object" &&
+              v !== null &&
+              typeof (v as any).x === "number" &&
+              typeof (v as any).y === "number"
+                ? { value: v as { x: number; y: number } }
+                : { issues: [{ message: "expected {x:number,y:number}" }] },
+            jsonSchema: {
+              input: () => ({
+                type: "object",
+                properties: { x: { type: "number" }, y: { type: "number" } },
+                required: ["x", "y"],
+              }),
+              output: () => ({
+                type: "object",
+                properties: { x: { type: "number" }, y: { type: "number" } },
+              }),
+            },
+          },
+        };
+
+        const appCapabilities = { tools: { listChanged: true } };
+        app = new App(testAppInfo, appCapabilities, { autoResize: false });
+        app.registerTool(
+          "translate",
+          { inputSchema: PointSchema, outputSchema: PointSchema },
+          async ({ x, y }) => ({
+            content: [],
+            structuredContent: { x: x + 1, y: y + 1 },
+          }),
+        );
+        await app.connect(appTransport);
+
+        const list = await bridge.listTools({});
+        expect(list.tools[0].inputSchema).toEqual({
+          type: "object",
+          properties: { x: { type: "number" }, y: { type: "number" } },
+          required: ["x", "y"],
+        });
+        expect(list.tools[0].outputSchema).toBeDefined();
+
+        const ok = await bridge.callTool({
+          name: "translate",
+          arguments: { x: 1, y: 2 },
+        });
+        expect(ok.structuredContent).toEqual({ x: 2, y: 3 });
+
+        await expect(
+          bridge.callTool({ name: "translate", arguments: { x: "bad" } }),
+        ).rejects.toThrow(/Invalid input for tool translate/);
+      });
+
       it("returns empty list when no tools registered", async () => {
         const appCapabilities = { tools: { listChanged: true } };
         app = new App(testAppInfo, appCapabilities, { autoResize: false });

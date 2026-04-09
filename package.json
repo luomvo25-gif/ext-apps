@@ -118,6 +118,9 @@
     },
     "react-dom": {
       "optional": true
+    },
+    "zod": {
+      "optional": true
     }
   },
   "overrides": {
@@ -125,5 +128,8 @@
     "seroval-plugins": "1.4.2",
     "solid-js": "1.9.10",
     "@types/node": "20.19.27"
+  },
+  "dependencies": {
+    "@standard-schema/spec": "^1.1.0"
   }
 }

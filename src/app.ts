@@ -64,12 +64,13 @@ import {
   McpUiRequestDisplayModeResultSchema,
 } from "./types";
 import { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { safeParseAsync } from "zod/v4";
 import {
-  RegisteredTool,
-  ToolCallback,
-} from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z, ZodSchema } from "zod/v4";
+  StandardSchemaWithJSON,
+  standardSchemaToJsonSchema,
+  validateStandardSchema,
+} from "./standard-schema";
+
+export type { StandardSchemaWithJSON } from "./standard-schema";
 
 export { PostMessageTransport } from "./message-transport";
 export * from "./types";
@@ -172,6 +173,48 @@ type RequestHandlerExtra = Parameters<
 >[1];
 
 /**
+ * Callback for an app-registered tool. When `In` is provided, `args` is the
+ * validated/parsed input; when `In` is `undefined`, the callback receives only
+ * `extra`.
+ *
+ * Mirrors `ToolCallback` from `@modelcontextprotocol/sdk/server/mcp.js` but is
+ * parameterized over {@link StandardSchemaWithJSON} instead of zod, so any
+ * Standard-Schema-compatible library (Zod, ArkType, Valibot, …) can be used.
+ */
+export type AppToolCallback<
+  In extends StandardSchemaWithJSON | undefined = undefined,
+> = In extends StandardSchemaWithJSON
+  ? (
+      args: StandardSchemaWithJSON.InferOutput<In>,
+      extra: RequestHandlerExtra,
+    ) => CallToolResult | Promise<CallToolResult>
+  : (extra: RequestHandlerExtra) => CallToolResult | Promise<CallToolResult>;
+
+/**
+ * Handle returned by {@link App.registerTool}. Mirrors `RegisteredTool` from
+ * `@modelcontextprotocol/sdk/server/mcp.js` but stores
+ * {@link StandardSchemaWithJSON} schemas.
+ */
+export type RegisteredAppTool = {
+  title?: string;
+  description?: string;
+  inputSchema?: StandardSchemaWithJSON;
+  outputSchema?: StandardSchemaWithJSON;
+  annotations?: ToolAnnotations;
+  _meta?: Record<string, unknown>;
+  enabled: boolean;
+  enable(): void;
+  disable(): void;
+  remove(): void;
+  update(updates: Partial<Omit<RegisteredAppTool, "update">>): void;
+  /** @internal */
+  handler: (
+    args: unknown,
+    extra: RequestHandlerExtra,
+  ) => Promise<CallToolResult>;
+};
+
+/**
  * Maps DOM-style event names to their notification `params` types.
  *
  * Used by {@link App `App`} (which extends {@link ProtocolWithEvents `ProtocolWithEvents`})
@@ -254,7 +297,7 @@ export class App extends ProtocolWithEvents<
   private _hostCapabilities?: McpUiHostCapabilities;
   private _hostInfo?: Implementation;
   private _hostContext?: McpUiHostContext;
-  private _registeredTools: { [name: string]: RegisteredTool } = {};
+  private _registeredTools: { [name: string]: RegisteredAppTool } = {};
 
   protected readonly eventSchemas = {
     toolinput: McpUiToolInputNotificationSchema,
@@ -317,8 +360,8 @@ export class App extends ProtocolWithEvents<
   }
 
   registerTool<
-    OutputArgs extends ZodSchema,
-    InputArgs extends undefined | ZodSchema = undefined,
+    OutputArgs extends StandardSchemaWithJSON,
+    InputArgs extends undefined | StandardSchemaWithJSON = undefined,
   >(
     name: string,
     config: {
@@ -329,10 +372,10 @@ export class App extends ProtocolWithEvents<
       annotations?: ToolAnnotations;
       _meta?: Record<string, unknown>;
     },
-    cb: ToolCallback<InputArgs>,
-  ): RegisteredTool {
+    cb: AppToolCallback<InputArgs>,
+  ): RegisteredAppTool {
     const app = this;
-    const registeredTool: RegisteredTool = {
+    const registeredTool: RegisteredAppTool = {
       title: config.title,
       description: config.description,
       inputSchema: config.inputSchema,
@@ -356,37 +399,41 @@ export class App extends ProtocolWithEvents<
         delete app._registeredTools[name];
         app.sendToolListChanged();
       },
-      handler: (async (args: any, extra: RequestHandlerExtra) => {
+      handler: async (rawArgs, extra) => {
         if (!registeredTool.enabled) {
           throw new Error(`Tool ${name} is disabled`);
         }
+        let parsedArgs = rawArgs;
         if (config.inputSchema) {
-          const parseResult = await safeParseAsync(
-            config.inputSchema as any,
-            args,
-          );
-          if (!parseResult.success) {
+          try {
+            parsedArgs = await validateStandardSchema(
+              config.inputSchema,
+              rawArgs,
+            );
+          } catch (e) {
             throw new Error(
-              `Invalid input for tool ${name}: ${parseResult.error}`,
+              `Invalid input for tool ${name}: ${(e as Error).message}`,
             );
           }
-          args = parseResult.data;
         }
-        const result = await cb(args, extra as any);
+        const result = await (cb as AppToolCallback<StandardSchemaWithJSON>)(
+          parsedArgs,
+          extra,
+        );
         if (config.outputSchema) {
-          const parseResult = await safeParseAsync(
-            config.outputSchema as any,
-            result.structuredContent,
-          );
-          if (!parseResult.success) {
+          try {
+            result.structuredContent = (await validateStandardSchema(
+              config.outputSchema,
+              result.structuredContent,
+            )) as CallToolResult["structuredContent"];
+          } catch (e) {
             throw new Error(
-              `Invalid output for tool ${name}: ${parseResult.error}`,
+              `Invalid output for tool ${name}: ${(e as Error).message}`,
             );
           }
-          return parseResult.data;
         }
         return result;
-      }) as any,
+      },
     };
 
     this._registeredTools[name] = registeredTool;
@@ -416,7 +463,7 @@ export class App extends ProtocolWithEvents<
       if (!tool) {
         throw new Error(`Tool ${params.name} not found`);
       }
-      return (tool.handler as any)(params.arguments as any, extra);
+      return tool.handler(params.arguments, extra);
     };
     this.onlisttools = async (_params, _extra) => {
       const tools: Tool[] = Object.entries(this._registeredTools)
@@ -427,7 +474,7 @@ export class App extends ProtocolWithEvents<
             title: tool.title,
             description: tool.description,
             inputSchema: (tool.inputSchema
-              ? z.toJSONSchema(tool.inputSchema as ZodSchema)
+              ? standardSchemaToJsonSchema(tool.inputSchema, "input")
               : {
                   type: "object" as const,
                   properties: {},
@@ -436,8 +483,9 @@ export class App extends ProtocolWithEvents<
           // outputSchema is optional in core MCP — only emit when the app
           // provided one, otherwise hosts would assume structuredContent.
           if (tool.outputSchema) {
-            result.outputSchema = z.toJSONSchema(
-              tool.outputSchema as ZodSchema,
+            result.outputSchema = standardSchemaToJsonSchema(
+              tool.outputSchema,
+              "output",
             ) as Tool["outputSchema"];
           }
           if (tool.annotations) {
