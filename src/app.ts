@@ -22,8 +22,6 @@ import {
   ReadResourceRequest,
   ReadResourceResult,
   ReadResourceResultSchema,
-  Request,
-  Result,
   Tool,
   ToolAnnotations,
   ToolListChangedNotification,

@@ -1353,7 +1353,7 @@ describe("App <-> AppBridge integration", () => {
         const tool2 = app.registerTool("tool2", {}, async (_args: any) => ({
           content: [],
         }));
-        const tool3 = app.registerTool("tool3", {}, async (_args: any) => ({
+        app.registerTool("tool3", {}, async (_args: any) => ({
           content: [],
         }));
 
@@ -1385,13 +1385,9 @@ describe("App <-> AppBridge integration", () => {
         const appCapabilities = { tools: { listChanged: true } };
         app = new App(testAppInfo, appCapabilities, { autoResize: false });
 
-        const tool1 = app.registerTool(
-          "enabled-tool",
-          {},
-          async (_args: any) => ({
-            content: [],
-          }),
-        );
+        app.registerTool("enabled-tool", {}, async (_args: any) => ({
+          content: [],
+        }));
         const tool2 = app.registerTool(
           "disabled-tool",
           {},
