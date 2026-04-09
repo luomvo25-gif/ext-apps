@@ -1861,24 +1861,7 @@ tool.remove();
 
 #### Long-Running App Tools
 
-App tools are bounded by the app's render lifecycle: once the host tears down the iframe, in-flight handlers are aborted. For work that may outlive a single render, app `tools/call` MAY be **task-augmented** per [core MCP Tasks](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks): the app returns a `CreateTaskResult` handle instead of an immediate result, and the caller polls `tasks/get` / `tasks/result`.
-
-Hosts that support tasks:
-
-- MUST proxy `tasks/get`, `tasks/result`, `tasks/cancel`, and `notifications/tasks/status` between the agent and the app while the app is mounted, the same way they proxy `tools/call`
-- SHOULD surface task `status` to the user (e.g., progress UI)
-
-Apps SHOULD NOT host long-lived work themselves. Instead, the app tool handler SHOULD delegate to the server (via `callServerTool()`) and return the server's task — so the task survives app teardown and the host can continue polling the server directly:
-
-```typescript
-app.registerTool("export_report", { /* … */ }, async (args) => {
-  // Kick off on the server; return its task handle so the host keeps
-  // polling the server even if this iframe is torn down.
-  return app.callServerTool("start_report_export", args, {
-    _meta: { task: { ttl: 300 } }, // request a task-augmented call
-  });
-});
-```
+App tools are bounded by the app's render lifecycle. For work that may outlive a single render, app `tools/call` MAY be task-augmented per [core MCP Tasks](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks); hosts proxy the `tasks/*` methods to the app exactly as they proxy `tools/call`. Because the iframe can be torn down at any time, apps SHOULD delegate long-lived work to the server (via `callServerTool()`) and return the server's task handle, so the host can continue polling the server after teardown.
 
 #### Schema Validation
 
