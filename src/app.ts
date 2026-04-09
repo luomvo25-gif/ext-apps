@@ -403,34 +403,23 @@ export class App extends ProtocolWithEvents<
         if (!registeredTool.enabled) {
           throw new Error(`Tool ${name} is disabled`);
         }
-        let parsedArgs = rawArgs;
-        if (config.inputSchema) {
-          try {
-            parsedArgs = await validateStandardSchema(
+        const parsedArgs = config.inputSchema
+          ? await validateStandardSchema(
               config.inputSchema,
               rawArgs,
-            );
-          } catch (e) {
-            throw new Error(
-              `Invalid input for tool ${name}: ${(e as Error).message}`,
-            );
-          }
-        }
+              `Invalid input for tool ${name}: `,
+            )
+          : rawArgs;
         const result = await (cb as AppToolCallback<StandardSchemaWithJSON>)(
           parsedArgs,
           extra,
         );
         if (config.outputSchema) {
-          try {
-            result.structuredContent = (await validateStandardSchema(
-              config.outputSchema,
-              result.structuredContent,
-            )) as CallToolResult["structuredContent"];
-          } catch (e) {
-            throw new Error(
-              `Invalid output for tool ${name}: ${(e as Error).message}`,
-            );
-          }
+          result.structuredContent = (await validateStandardSchema(
+            config.outputSchema,
+            result.structuredContent,
+            `Invalid output for tool ${name}: `,
+          )) as CallToolResult["structuredContent"];
         }
         return result;
       },

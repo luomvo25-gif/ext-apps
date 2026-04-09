@@ -47,11 +47,12 @@ export function standardSchemaToJsonSchema(
 
 /**
  * Validate a value against a Standard Schema. Returns the parsed value on
- * success or throws with a formatted issue list on failure.
+ * success or throws with a formatted issue list (optionally prefixed).
  */
 export async function validateStandardSchema<S extends StandardSchemaV1>(
   schema: S,
   value: unknown,
+  errorPrefix = "",
 ): Promise<StandardSchemaV1.InferOutput<S>> {
   const result = await schema["~standard"].validate(value);
   if (result.issues) {
@@ -63,7 +64,7 @@ export async function validateStandardSchema<S extends StandardSchemaV1>(
         return path ? `${path}: ${i.message}` : i.message;
       })
       .join("; ");
-    throw new Error(msg);
+    throw new Error(errorPrefix + msg);
   }
   return result.value;
 }

@@ -225,11 +225,10 @@ export function registerAppTool<
     inputSchema?: InputArgs;
     outputSchema?: OutputArgs;
   },
-  // ToolCallback in sdk@1.x is constrained to zod; widen here so callers using
-  // other Standard Schema libs type-check. Runtime is fully delegated to
-  // McpServer.registerTool, which in 1.29.0 already handles anything zod-shaped
-  // (and zod ≥3.25 is a Standard Schema). Non-zod callers get correct arg
-  // inference here; the cast below bridges the 1.x SDK type until v2.
+  // The widened constraint signals the v2 API shape, but NOTE: McpServer in
+  // sdk@1.x still calls zod internals at runtime, so non-zod schemas will fail
+  // here until we depend on sdk v2. Zod (which all current callers use) is
+  // unaffected. The cast below bridges the 1.x type signature.
   cb: ToolCallback<
     InputArgs extends undefined | ZodRawShapeCompat | AnySchema
       ? InputArgs
