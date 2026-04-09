@@ -1271,14 +1271,16 @@ When Apps declare the `tools` capability, the Host can send standard MCP tool re
 }
 ```
 
-**Tool Structure:**
+**Tool Structure** (identical to [core MCP `Tool`](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#tool)):
 ```typescript
 interface Tool {
   name: string;                    // Unique tool identifier
+  title?: string;                  // Display name
   description?: string;            // Human-readable description
   inputSchema: object;             // JSON Schema for arguments
-  outputSchema?: object;           // JSON Schema for structuredContent (matches core MCP)
+  outputSchema?: object;           // JSON Schema for structuredContent
   annotations?: ToolAnnotations;   // MCP tool annotations (e.g., readOnlyHint)
+  _meta?: object;
 }
 ```
 
@@ -1704,18 +1706,17 @@ Apps can register their own tools that hosts and agents can call, making apps **
 
 #### Motivation: Semantic Introspection
 
-Without tool registration, apps are black boxes to the model:
-- Model sees only the app's rendered iframe, which is opaque to it — not semantic state
-- Model cannot query the app's state, since it cannot synchronously access its DOM
-- Model cannot discover what operations are available
+Without tool registration, apps are opaque to the model:
+- The host renders the app in a sandboxed iframe and has no guaranteed access to its internals — apps may embed further cross-origin iframes (via `frameDomains`), and even where same-origin, DOM access is not part of the host↔app contract
+- The model therefore cannot query app state or discover what operations the app supports
 
-With tool registration, apps expose semantic interfaces:
-- Model discovers available operations via `tools/list`
-- Model queries app state via tools (e.g., `get_board_state`)
-- Model executes actions via tools (e.g., `make_move`)
-- Apps provide structured data instead of requiring HTML/CSS interpretation
+With tool registration, apps expose a semantic interface:
+- The model discovers available operations via `tools/list`
+- The model queries app state via tools (e.g., `get_board_state`)
+- The model executes actions via tools (e.g., `make_move`)
+- Apps return structured data rather than relying on the host to interpret rendered output
 
-This is a different model from approaches where apps *push* state to the model through side channels — e.g., OAI Apps SDK's [`setWidgetState()`](https://developers.openai.com/apps-sdk/reference/sdk#setwidgetstate), MCP-UI adding tool-call results to chat history, or this spec's own [`ui/update-model-context`](#uiupdate-model-context) notification. Tool registration is *pull*: the agent actively queries app state and executes operations on demand through tools. The two are complementary.
+This is *pull*-based and complements the *push*-based [`ui/update-model-context`](#uiupdate-model-context) request already defined in this spec (and analogous mechanisms elsewhere, e.g. OAI Apps SDK's [`setWidgetState()`](https://developers.openai.com/apps-sdk/reference/sdk#setwidgetstate)). Push lets an app proactively keep the model's context current; pull lets the agent query and command the app on demand. Apps may use either or both.
 
 #### App Tool Registration
 
@@ -1926,7 +1927,7 @@ const app = new App(
   { tools: { listChanged: true } }
 );
 
-// Agent can query semantic state (no DOM parsing)
+// Agent can query semantic state directly
 app.registerTool(
   "get_board_state",
   {
@@ -2102,7 +2103,7 @@ Requires app `tools` capability.
 
 #### Use Cases
 
-**Introspection:** Agent queries app state semantically without DOM parsing
+**Introspection:** Agent queries app state semantically — the app's DOM is not exposed to the host or model
 
 **Voice mode:** Agent drives app interactions programmatically based on voice commands
 
@@ -2409,10 +2410,10 @@ This proposal synthesizes feedback from the UI CWG and MCP-UI community, host im
 
 **Rationale:**
 
-- **Semantic introspection:** Apps can expose their state and operations in structured, machine-readable format without requiring agents to parse DOM or interpret visual elements
+- **Semantic introspection:** Apps expose state and operations in a structured, machine-readable form. Hosts have no guaranteed DOM access into an app (which may itself nest cross-origin frames via `frameDomains`), so a tool surface is the only reliable introspection path
 - **Protocol reuse:** Reuses existing MCP tool infrastructure (`tools/call`, `tools/list`, `notifications/tools/list_changed`) instead of inventing new message types
 - **WebMCP alignment:** Brings WebMCP's vision of "JavaScript functions as tools" to MCP Apps while staying MCP-native
-- **Agent-driven interaction:** Enables agents to actively query app state and command app operations, rather than apps pushing state updates via custom messages
+- **Agent-driven interaction:** Agents can pull app state and issue commands on demand, complementing push-style [`ui/update-model-context`](#uiupdate-model-context)
 - **Bidirectional symmetry:** Apps act as both MCP clients (calling server tools) and MCP servers (providing app tools), creating clean architectural symmetry
 - **Use case coverage:** Enables interactive games, stateful forms, complex workflows, and reusable widgets
 
