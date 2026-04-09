@@ -515,7 +515,7 @@ describe("App <-> AppBridge integration", () => {
       };
 
       await app.connect(appTransport);
-      await expect(
+      expect(
         app.updateModelContext({
           content: [{ type: "text", text: "Test" }],
         }),
@@ -648,7 +648,7 @@ describe("App <-> AppBridge integration", () => {
 
       // Attempting to connect again with a different transport should throw
       const [, secondBridgeTransport] = InMemoryTransport.createLinkedPair();
-      await expect(bridge.connect(secondBridgeTransport)).rejects.toThrow(
+      expect(bridge.connect(secondBridgeTransport)).rejects.toThrow(
         "AppBridge is already connected",
       );
     });
@@ -659,7 +659,7 @@ describe("App <-> AppBridge integration", () => {
 
       // Attempting to connect again should throw
       const [secondAppTransport] = InMemoryTransport.createLinkedPair();
-      await expect(app.connect(secondAppTransport)).rejects.toThrow(
+      expect(app.connect(secondAppTransport)).rejects.toThrow(
         "App is already connected",
       );
     });
@@ -669,7 +669,7 @@ describe("App <-> AppBridge integration", () => {
       await app.connect(appTransport);
 
       // Should throw regardless of whether it's the same or a different transport
-      await expect(bridge.connect(bridgeTransport)).rejects.toThrow(
+      expect(bridge.connect(bridgeTransport)).rejects.toThrow(
         "AppBridge is already connected",
       );
     });
@@ -792,7 +792,7 @@ describe("App <-> AppBridge integration", () => {
         sendRequest: async () => ({}),
       } as any;
 
-      await expect((tool.handler as any)(mockExtra)).rejects.toThrow(
+      expect((tool.handler as any)(mockExtra)).rejects.toThrow(
         "Tool test-tool is disabled",
       );
     });
@@ -819,12 +819,12 @@ describe("App <-> AppBridge integration", () => {
       } as any;
 
       // Valid input should work
-      await expect(
+      expect(
         (tool.handler as any)({ name: "Alice" }, mockExtra),
       ).resolves.toBeDefined();
 
       // Invalid input should fail
-      await expect(
+      expect(
         (tool.handler as any)({ invalid: "field" }, mockExtra),
       ).rejects.toThrow("Invalid input for tool greet");
     });
@@ -852,7 +852,7 @@ describe("App <-> AppBridge integration", () => {
       } as any;
 
       // Valid output should work
-      await expect((tool.handler as any)(mockExtra)).resolves.toBeDefined();
+      expect((tool.handler as any)(mockExtra)).resolves.toBeDefined();
     });
 
     it("tool enable/disable/update/remove trigger sendToolListChanged", async () => {
@@ -917,7 +917,7 @@ describe("App <-> AppBridge integration", () => {
 
       const receivedCalls: unknown[] = [];
 
-      app.onlisttools = async (params, extra) => {
+      app.onlisttools = async (params, _extra) => {
         receivedCalls.push(params);
         return {
           tools: [
@@ -1055,7 +1055,7 @@ describe("App <-> AppBridge integration", () => {
         await app.connect(appTransport);
 
         // Try to call a tool that doesn't exist
-        await expect(
+        expect(
           bridge.callTool({
             name: "nonexistent",
             arguments: {},
@@ -1140,7 +1140,7 @@ describe("App <-> AppBridge integration", () => {
         await app.connect(appTransport);
 
         // Should work when enabled
-        await expect(
+        expect(
           bridge.callTool({ name: "test-tool", arguments: {} }),
         ).resolves.toBeDefined();
 
@@ -1148,7 +1148,7 @@ describe("App <-> AppBridge integration", () => {
         tool.disable();
 
         // Should throw when disabled
-        await expect(
+        expect(
           bridge.callTool({ name: "test-tool", arguments: {} }),
         ).rejects.toThrow("Tool test-tool is disabled");
       });
@@ -1174,7 +1174,7 @@ describe("App <-> AppBridge integration", () => {
         await app.connect(appTransport);
 
         // Valid input should work
-        await expect(
+        expect(
           bridge.callTool({
             name: "strict-tool",
             arguments: { required: "hello" },
@@ -1182,7 +1182,7 @@ describe("App <-> AppBridge integration", () => {
         ).resolves.toBeDefined();
 
         // Invalid input should fail
-        await expect(
+        expect(
           bridge.callTool({
             name: "strict-tool",
             arguments: { wrong: "field" },
@@ -1243,7 +1243,7 @@ describe("App <-> AppBridge integration", () => {
         tool.remove();
 
         // Should fail after removal
-        await expect(
+        expect(
           bridge.callTool({ name: "dynamic-tool", arguments: {} }),
         ).rejects.toThrow("Tool dynamic-tool not found");
 
@@ -1380,7 +1380,7 @@ describe("App <-> AppBridge integration", () => {
         });
         expect(ok.structuredContent).toEqual({ x: 2, y: 3 });
 
-        await expect(
+        expect(
           bridge.callTool({ name: "translate", arguments: { x: "bad" } }),
         ).rejects.toThrow(/Invalid input for tool translate/);
       });
@@ -1558,7 +1558,7 @@ describe("App <-> AppBridge integration", () => {
         expect(listResult.tools.map((t) => t.name)).not.toContain("counter");
 
         // Should no longer be callable
-        await expect(
+        expect(
           bridge.callTool({ name: "counter", arguments: {} }),
         ).rejects.toThrow("Tool counter not found");
       });
@@ -1617,11 +1617,11 @@ describe("App <-> AppBridge integration", () => {
         expect(list2.tools.map((t) => t.name)).toEqual(["app2-tool"]);
 
         // Each app should only be able to call its own tools
-        await expect(
+        expect(
           bridge1.callTool({ name: "app1-tool", arguments: {} }),
         ).resolves.toBeDefined();
 
-        await expect(
+        expect(
           bridge1.callTool({ name: "app2-tool", arguments: {} }),
         ).rejects.toThrow("Tool app2-tool not found");
 
@@ -1716,7 +1716,7 @@ describe("App <-> AppBridge integration", () => {
       await bridge.connect(bridgeTransport);
       await app.connect(appTransport);
 
-      await expect(
+      expect(
         // @ts-expect-error intentionally testing wrong usage
         app.callServerTool("my_tool"),
       ).rejects.toThrow(

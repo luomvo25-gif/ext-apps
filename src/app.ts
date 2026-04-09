@@ -987,7 +987,7 @@ export class App extends ProtocolWithEvents<
    * Verify that the host supports the capability required for the given request method.
    * @internal
    */
-  assertCapabilityForMethod(method: AppRequest["method"]): void {
+  assertCapabilityForMethod(_method: AppRequest["method"]): void {
     // TODO
   }
 
@@ -1017,7 +1017,7 @@ export class App extends ProtocolWithEvents<
    * Verify that the app supports the capability required for the given notification method.
    * @internal
    */
-  assertNotificationCapability(method: AppNotification["method"]): void {
+  assertNotificationCapability(_method: AppNotification["method"]): void {
     // TODO
   }
 
