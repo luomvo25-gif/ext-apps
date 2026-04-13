@@ -1,20 +1,27 @@
-.DS_Store
-dist/
-node_modules/
-yarn.lock
-bun.lockb
-.vscode/
-docs/api/
-tmp/
-intermediate-findings/
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# Playwright
-playwright-report/
-test-results/
-__pycache__/
-*.pyc
+# dependencies
+/node_modules
 
-# MCPB bundles (built artifacts)
-*.mcpb
-.mcpb-stage/
-.mcpb-smoke/
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
